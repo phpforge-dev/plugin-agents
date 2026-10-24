@@ -7,7 +7,7 @@ test('mounts existing workflow and removes owned UI on disable',async()=>{
  const cleanups=[];let contribution;const format=(parts,...args)=>typeof parts==='string'?parts:parts.reduce((v,s,i)=>v+s+(args[i]??''),'');let disposed=0;
  const sdk={own:fn=>cleanups.push(fn),provide:(name,value)=>contribution=value,tr:s=>s,msg:format,html:format,activeLanguage:()=> 'en',dockWindow:()=>()=>{},resizeToolWindow:()=>{},toolIcon:()=>{},editorFont:{size:13,family:'monospace'},fileIcon:()=>'',keymap:{registerAction:()=>()=>{},onChange:()=>()=>{},shortcut:()=>'',ariaShortcuts:()=>''},monaco:{editor:{createDiffEditor:()=>({dispose:()=>disposed++,setModel:()=>{}})}}};
  activate(sdk);const api=new Proxy({agents:async()=>[],onDockerProgress:()=>()=>{},onTerminalEvent:()=>()=>{}},{get:(obj,key)=>obj[key]??(async()=>{throw Error('unexpected operation '+String(key));})});
- const before=document.querySelectorAll('*').length;
+ sdk.api=api;const before=document.querySelectorAll('*').length;
  const args='agents'==='agents'?[api,document.getElementById('agent'),{context:()=>undefined,reload:async()=>{},status:()=>{},language:()=>undefined}]:'agents'==='git'?[api,()=>false,async()=>{}]:'agents'==='docker-services'?[api,{docker:async()=>{}}]:[api];
  const controller=contribution.mount(...args);await Promise.resolve();assert.ok(document.querySelectorAll('*').length>before);assert.equal(typeof controller.reset,'function');
  for(const fn of cleanups.reverse())fn();assert.equal(document.querySelectorAll('#git-panel,#docker-panel,#terminal-panel,#agent-transcript').length,0);if('agents'==='git')assert.equal(disposed,1);w.happyDOM.abort();

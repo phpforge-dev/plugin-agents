@@ -74,9 +74,9 @@ export function mountAgent(api: IdeApi, root: HTMLElement, hooks: Hooks) {
   const dialog = document.createElement('dialog'); dialog.className = 'agent-diff';
   dialog.innerHTML = html('<header><strong></strong><span>Antes · Depois do agente</span><button class="close">Fechar</button></header><div class="agent-diff-editor"></div>');
   dialog.querySelector('strong')!.textContent = change.path;
-  document.body.append(dialog); dialog.showModal();
+  document.body.append(dialog);own(()=>dialog.remove()); dialog.showModal();
   const language = hooks.language(change.path);
-  const original = monaco.editor.createModel(change.before ?? '', language); const modified = monaco.editor.createModel(change.after, language);
+  const original = ownModel(change.before ?? '', language); const modified = ownModel(change.after, language);
   const editor = ownEditor(dialog.querySelector<HTMLElement>('.agent-diff-editor')!, { readOnly: true, automaticLayout: true, renderSideBySide: true, minimap: { enabled: false } });
   editor.setModel({ original, modified });
   const close = () => { editor.dispose(); original.dispose(); modified.dispose(); dialog.close(); dialog.remove(); };
@@ -157,3 +157,5 @@ export function mountAgent(api: IdeApi, root: HTMLElement, hooks: Hooks) {
 }
 
 function ownEditor(...args:any[]){const v=monaco.editor.createDiffEditor(...args);own(()=>v.dispose());return v;}
+
+function ownModel(...args:any[]){const model=monaco.editor.createModel(...args);own(()=>model.dispose());return model;}

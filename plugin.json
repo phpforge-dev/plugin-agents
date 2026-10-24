@@ -10,7 +10,8 @@
   },
   "permissions": [
     "project.read",
-    "workbench"
+    "workbench",
+    "process"
   ],
   "workbench": {
     "apiVersion": 1,
