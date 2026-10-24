@@ -1,3 +1,4 @@
+import {agentGeneration} from './agent-generation';
 import {tr,msg,html,dockWindow,resizeToolWindow,toolIcon,editorFont,keymap,fileIcon,activeLanguage,monaco,own,on,every} from './sdk';
 
 
@@ -31,9 +32,12 @@ export function mountAgent(api: IdeApi, root: HTMLElement, hooks: Hooks) {
 
  const block = (cls: string, text = '') => { const el = document.createElement('div'); el.className = `agent-block ${cls}`; el.textContent = text; transcript.append(el); transcript.scrollTop = transcript.scrollHeight; return el; };
  function busy(value: boolean) {
+  for (const id of ['agent-select', 'agent-start', 'agent-new', 'agent-mode']) $<HTMLButtonElement>(id).disabled = value;
   running = value; $<HTMLButtonElement>('agent-send').disabled = value || !started; $<HTMLButtonElement>('agent-cancel').disabled = !value;
   $<HTMLTextAreaElement>('agent-prompt').disabled = !started;
  }
+ const generation = agentGeneration(api, () => started && !running && !changes.length, busy);
+ own(() => generation.reset());
  async function load() {
   agents = await api.agents();
   const select = $<HTMLSelectElement>('agent-select');
@@ -102,6 +106,7 @@ export function mountAgent(api: IdeApi, root: HTMLElement, hooks: Hooks) {
  }
 
  function handle(event: AgentEvent) {
+  generation.handle(event);
   switch (event.type) {
    case 'session': {
     started = true; busy(false); $<HTMLButtonElement>('agent-new').disabled = false;
@@ -153,7 +158,7 @@ export function mountAgent(api: IdeApi, root: HTMLElement, hooks: Hooks) {
   }
  }
  void load().catch(error => { $('agent-detail').textContent = String(error); });
- return { handle, reset() { transcript.replaceChildren(); root.querySelector<HTMLElement>('.agent-welcome')!.hidden = false; tools.clear(); changes = []; renderChanges(); started = false; busy(false); void load(); } };
+ return { handle, generate: generation.generate, cancel: generation.cancel, reset() { generation.reset(); transcript.replaceChildren(); root.querySelector<HTMLElement>('.agent-welcome')!.hidden = false; tools.clear(); changes = []; renderChanges(); started = false; busy(false); void load(); } };
 }
 
 function ownEditor(...args:any[]){const v=monaco.editor.createDiffEditor(...args);own(()=>v.dispose());return v;}

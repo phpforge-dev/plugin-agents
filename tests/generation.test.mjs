@@ -1,0 +1,34 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+
+test('generation collects only messages, rejects overlap, failures and disposal', async () => {
+ const folder = await mkdtemp(join(tmpdir(),'agent-generation-'));
+ const output = join(folder,'test.mjs');
+ await build({entryPoints:['src/agent-generation.ts'],outfile:output,bundle:true,format:'esm'});
+ const {agentGeneration} = await import(pathToFileURL(output));
+ let available = false, busy = false, error;
+ const generation = agentGeneration({agentPrompt:async()=>{if(error)throw error;},agentCancel:async()=>{}},()=>available,value=>busy=value);
+ await assert.rejects(generation.generate('test'),/Conecte/);
+ available = true;
+ const result = generation.generate('test');
+ assert.equal(busy,true);
+ await assert.rejects(generation.generate('overlap'),/Conecte/);
+ generation.handle({type:'thought',text:'private reasoning'});
+ generation.handle({type:'message',text:'feat: '});generation.handle({type:'message',text:'change'});
+ generation.handle({type:'done',stopReason:'end_turn'});
+ assert.equal(await result,'feat: change');
+ const cancelled = generation.generate('test');generation.handle({type:'done',stopReason:'cancelled'});
+ await assert.rejects(cancelled,/interrompida/);
+ const empty = generation.generate('test');generation.handle({type:'done',stopReason:'end_turn'});
+ await assert.rejects(empty,/não retornou/);
+ const disposed = generation.generate('test');generation.reset();
+ await assert.rejects(disposed,/encerrada/);
+ error = Error('offline');await assert.rejects(generation.generate('test'),/offline/);
+ assert.equal(busy,false);
+ await rm(folder,{recursive:true,force:true});
+});
