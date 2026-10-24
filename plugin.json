@@ -1,7 +1,7 @@
 {
   "id": "phpforge.agents",
   "name": "Agents",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minIdeVersion": "0.2.13",
   "main": "main.js",
   "description": "agents workbench integration with explicit host services.",
