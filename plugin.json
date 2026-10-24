@@ -1,0 +1,31 @@
+{
+  "id": "phpforge.agents",
+  "name": "Agents",
+  "version": "1.0.0",
+  "minIdeVersion": "0.2.13",
+  "main": "main.js",
+  "description": "agents workbench integration with explicit host services.",
+  "activation": {
+    "languages": []
+  },
+  "permissions": [
+    "project.read",
+    "workbench"
+  ],
+  "workbench": {
+    "apiVersion": 1,
+    "main": "workbench.js",
+    "style": "workbench.css",
+    "services": [
+      "agentCancel",
+      "agentDiscard",
+      "agentKeep",
+      "agentMode",
+      "agentPermission",
+      "agentPrompt",
+      "agentReset",
+      "agentStart",
+      "agents"
+    ]
+  }
+}

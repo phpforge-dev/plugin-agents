@@ -1,0 +1,78 @@
+
+#agent{display:flex;flex-direction:column;gap:8px;min-height:0;height:100%}
+#agent:not([hidden]){display:flex}
+.agent-head{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}
+.agent-field{display:flex;flex-direction:column;font-size:11px;gap:2px;margin:0}
+.agent-field select{font-size:12px;padding:3px}
+.agent-detail{font-size:11px;color:var(--ij-text-secondary);margin:0}
+
+#agent-transcript{flex:1;min-height:120px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.5}
+.agent-block{white-space:pre-wrap;overflow-wrap:anywhere;padding:6px 8px;border-radius:6px}
+.agent-user{background:var(--ij-selection);align-self:flex-end;max-width:90%}
+.agent-message{background:transparent}
+.agent-thought summary{cursor:pointer;color:var(--ij-text-secondary)}
+.agent-thought div{color:var(--ij-text-secondary);white-space:pre-wrap}
+.agent-tool{font-family:monospace;font-size:11px;border:1px solid var(--border)}
+.agent-tool[data-status="completed"]{color:var(--ij-success)}
+.agent-tool[data-status="failed"]{color:var(--ij-error)}
+.agent-plan{border-left:2px solid var(--accent)}
+.agent-plan [data-status="completed"]{color:var(--ij-text-secondary);text-decoration:line-through}
+.agent-permission{border:1px solid var(--ij-warning);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.agent-permission p{width:100%;margin:0}
+.agent-error{color:var(--ij-error)}
+.agent-note{color:var(--ij-text-secondary);font-size:11px}
+
+#agent-changes{border:1px solid var(--border);border-radius:6px;padding:6px;font-size:12px}
+#agent-changes[hidden]{display:none}
+.agent-changes-head{display:flex;gap:6px;align-items:center}
+.agent-changes-head strong{flex:1}
+#agent-change-list{list-style:none;margin:6px 0 0;padding:0;max-height:140px;overflow:auto}
+#agent-change-list li{display:flex;gap:4px;align-items:center}
+.agent-change-file{flex:1;text-align:left;font-family:monospace;background:transparent;border:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.agent-input textarea{width:100%;min-height:64px;resize:vertical;box-sizing:border-box}
+.agent-actions{display:flex;gap:6px;align-items:center;font-size:11px}
+.agent-actions label{flex:1;margin:0}
+.agent-diff{width:90vw;max-width:none;height:80vh;display:flex;flex-direction:column;gap:6px}
+.agent-diff:not([open]){display:none}
+.agent-diff header{display:flex;gap:10px;align-items:center}
+.agent-diff header span{flex:1;color:var(--ij-text-secondary)}
+.agent-diff-editor{flex:1;min-height:0}
+.tools>#agent,.tools>#db{padding:0 12px 14px}
+
+#agent{padding:14px;display:flex;flex-direction:column;gap:12px}
+#agent[hidden]{display:none}
+.agent-head{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.agent-field{flex:1;min-width:90px;font-size:11px;color:var(--ij-text-secondary)}
+.agent-field select{margin-top:6px;width:100%;padding:7px;border-radius:5px}
+.agent-head button{padding:7px 10px}
+.agent-detail{font-size:11px;line-height:1.6;overflow-wrap:anywhere;margin:0}
+.agent-welcome{text-align:center;margin:auto 0;padding:32px 8px}
+.agent-welcome[hidden]{display:none}
+.agent-emblem{font-size:44px;color:var(--ij-badge-purple-text)}
+.agent-welcome h2{font-size:21px;font-weight:500;color:var(--ij-text)}
+.agent-welcome p{color:var(--ij-text-secondary);line-height:1.8;font-size:12px}
+.agent-examples{display:grid;gap:8px;margin:24px 0}
+.agent-examples button{text-align:left;padding:12px;border-radius:6px;background:var(--ij-popup);border:1px solid var(--ij-control-border)}
+.agent-welcome small{color:var(--ij-text-info);font-size:10px}
+.agent-input{border:1px solid var(--ij-control-border);border-radius:9px;padding:9px;background:var(--ij-field)}
+.agent-input:focus-within{border-color:var(--ij-focus)}
+.agent-input textarea{border:0!important;background:transparent!important;min-height:85px;resize:vertical;width:100%;box-sizing:border-box;outline:0;padding:5px;color:inherit}
+.agent-actions{display:flex;align-items:center;gap:6px;font-size:10px}
+.agent-actions label{margin-right:auto}
+.agent-actions button{padding:5px 8px;border-radius:5px}
+.agent-head{padding-right:22px}
+
+
+
+.project-dialog .primary,.connection-dialog .primary,.agent-actions .primary,.local-history .restore,.trust-dialog .primary{background:var(--ij-button-default);border-color:var(--ij-button-default);color:var(--ij-button-default-text)}
+
+.sql-error,.agent-error,.project-dialog-error{color:var(--danger)}
+.agent-user{background:var(--selection);color:var(--text)}
+.agent-thought summary,.agent-thought div,.agent-detail,.agent-note,.sql-row-number,#sql-summary,.agent-welcome p,.agent-welcome small{color:var(--muted)}
+.agent-tool[data-status=completed],.agent-plan [data-status=completed]{color:var(--success)}
+.agent-tool[data-status=failed]{color:var(--danger)}
+.agent-permission{border-color:var(--warning)}
+.agent-welcome h2{color:var(--text)}
+.agent-examples button{background:var(--raised);border-color:var(--border);color:var(--text)}
+
