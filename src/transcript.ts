@@ -46,6 +46,17 @@ export class Transcript {
   if (index < 0) return;
   Object.assign(this.items[index], patch); this.update(index);
  }
+ /** Saída do terminal chega em pedaços: atualiza só o texto, mantendo o bloco (e a rolagem do usuário). */
+ terminalOutput(id: string, text: string, limit = 200000) {
+  const index = this.items.findIndex(i => i.kind === 'terminal' && i.id === id); if (index < 0) return;
+  const item = this.items[index] as Extract<Item, {kind: 'terminal'}>;
+  item.output += text; if (item.output.length > limit) { item.output = item.output.slice(item.output.length - limit); item.truncated = true; }
+  const pre = this.els[index].querySelector<HTMLElement>('.agent-terminal-output');
+  if (!pre) { this.update(index); return; }
+  const follow = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+  pre.textContent = item.output; if (follow) pre.scrollTop = pre.scrollHeight;
+  this.scroll();
+ }
  element(item: Item) { return this.els[this.items.indexOf(item)]; }
  private update(index: number) { const el = this.create(this.items[index]); this.els[index].replaceWith(el); this.els[index] = el; this.scroll(); }
  private scroll() { this.root.scrollTop = this.root.scrollHeight; }

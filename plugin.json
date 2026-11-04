@@ -31,6 +31,8 @@
       "agentPrompt",
       "agentReset",
       "agentStart",
+      "agentTerminalDecision",
+      "agentTerminalKill",
       "agents",
       "listFiles",
       "searchSymbols",

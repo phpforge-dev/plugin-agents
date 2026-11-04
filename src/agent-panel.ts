@@ -44,7 +44,8 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 <div class="agent-actions"><button id="agent-attach" class="agent-icon" type="button" title="Adicionar anexo" aria-label="Adicionar anexo" aria-haspopup="menu" aria-expanded="false">+</button><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
- const transcript = new Transcript($('agent-transcript'));
+ const liveTerminals = new Set<string>();
+ const transcript = new Transcript($('agent-transcript'), { terminal: (el, item) => renderTerminal(el, item) });
  const welcome = root.querySelector<HTMLElement>('.agent-welcome')!;
  let agents: AgentInfo[] = []; let started = false; let running = false; let agentId = '';
  let changes: AgentChange[] = [];
@@ -139,9 +140,34 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
  }
  const generation = agentGeneration(api, () => started && !running && !changes.length, busy);
  own(() => generation.reset());
+ /** Bloco do terminal: comando exato, pasta, aprovação (Executar/Recusar), saída e Interromper. */
+ function renderTerminal(el: HTMLElement, item: Extract<Item, { kind: 'terminal' }>) {
+  const live = liveTerminals.has(item.id);
+  const status = item.status === 'waiting' ? (live ? 'Aguardando aprovação' : 'Não executado') : item.status === 'running' ? (live ? 'Executando…' : 'Não concluído')
+   : item.status === 'rejected' ? 'Recusado' : item.status === 'killed' ? `Interrompido${item.signal ? ` (${item.signal})` : ''}` : item.exitCode === 0 ? 'Concluído' : `Falhou · código ${item.exitCode ?? '?'}`;
+  el.dataset.state = item.status === 'exited' ? (item.exitCode === 0 ? 'ok' : 'failed') : item.status;
+  const head = document.createElement('div'); head.className = 'agent-terminal-head';
+  const title = document.createElement('strong'); title.textContent = item.status === 'waiting' && live ? 'Executar comando no terminal?' : 'Terminal';
+  const state = document.createElement('span'); state.className = 'agent-terminal-status'; state.textContent = status;
+  head.append(title, state);
+  const command = document.createElement('pre'); command.className = 'agent-terminal-command'; command.textContent = `$ ${item.command}`;
+  const cwd = document.createElement('div'); cwd.className = 'agent-terminal-cwd'; cwd.textContent = item.cwd ? `em ${item.cwd}/` : 'na raiz do projeto';
+  el.replaceChildren(head, command, cwd);
+  if (live && (item.status === 'waiting' || item.status === 'running')) {
+   const actions = document.createElement('div'); actions.className = 'agent-terminal-actions';
+   const button = (label: string, cls: string, run: () => Promise<unknown>) => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = () => { actions.querySelectorAll('button').forEach(x => x.disabled = true); void run().catch((error: unknown) => hooks.status(String(error))); }; actions.append(b); return b; };
+   if (item.status === 'waiting') { button(tr('Executar'), 'primary agent-terminal-run', () => api.agentTerminalDecision(item.id, true)); button(tr('Recusar'), 'agent-terminal-reject', () => api.agentTerminalDecision(item.id, false)); }
+   else button(tr('Interromper'), 'agent-terminal-kill', () => api.agentTerminalKill(item.id));
+   el.append(actions);
+  }
+  if (item.output) { const out = document.createElement('pre'); out.className = 'agent-terminal-output'; out.textContent = (item.truncated ? '…\n' : '') + item.output; el.append(out); requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); }
+ }
+ const pendingApprovals = () => transcript.items.some(i => i.kind === 'terminal' && i.status === 'waiting' && liveTerminals.has(i.id)) || !!root.querySelector('.agent-permission');
  function save() {
   if (!conversation.id || !transcript.items.length) return saving;
-  const payload = { id: conversation.id, agent: agentId, items: JSON.parse(JSON.stringify(transcript.items)) };
+  // Saída de terminal guardada só pelo final (20 KB) no histórico.
+  const items = JSON.parse(JSON.stringify(transcript.items)).map((i: Item) => i.kind === 'terminal' && i.output.length > 20000 ? { ...i, output: i.output.slice(-20000), truncated: true } : i);
+  const payload = { id: conversation.id, agent: agentId, items };
   saving = saving.then(() => api.agentHistorySave(payload)).then(() => undefined, (error: unknown) => hooks.status(msg`Histórico: ${String(error)}`));
   return saving;
  }
@@ -285,16 +311,28 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
     const box = document.createElement('div'); box.className = 'agent-block agent-permission'; const title = document.createElement('p'); title.textContent = `Permitir: ${event.title}?`; box.replaceChildren(title);
     for (const option of event.options) {
      const button = document.createElement('button'); button.textContent = option.name; button.dataset.kind = option.kind;
-     button.onclick = () => { box.querySelectorAll('button').forEach(b => b.disabled = true); title.textContent = `${event.title} — ${option.name}`; waiting = false; transcript.add({ kind: 'note', text: `${event.title} — ${option.name}` }); box.remove(); void api.agentPermission(event.id, option.id).catch((error: unknown) => hooks.status(String(error))); };
+     button.onclick = () => { box.querySelectorAll('button').forEach(b => b.disabled = true); title.textContent = `${event.title} — ${option.name}`; box.remove(); waiting = pendingApprovals(); transcript.add({ kind: 'note', text: `${event.title} — ${option.name}` }); void api.agentPermission(event.id, option.id).catch((error: unknown) => hooks.status(String(error))); };
      box.append(button);
     }
     $('agent-transcript').append(box); box.scrollIntoView({ block: 'nearest' });
     break;
    }
    case 'changes': changes = event.changes; renderChanges(); break;
+   case 'terminal' as never: {
+    const e = event as unknown as { id: string; command?: string; cwd?: string; status: 'waiting' | 'running' | 'exited' | 'rejected' | 'killed'; exitCode?: number | null; signal?: string | null };
+    if (e.status === 'waiting') { liveTerminals.add(e.id); transcript.add({ kind: 'terminal', id: e.id, command: e.command ?? '', cwd: e.cwd ?? '', status: 'waiting', output: '' }); }
+    else transcript.terminal(e.id, { status: e.status, ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}), ...(e.signal !== undefined ? { signal: e.signal } : {}) });
+    waiting = pendingApprovals(); history.refresh();
+    if (e.status === 'waiting') transcript.element(transcript.items[transcript.items.length - 1])?.scrollIntoView?.({ block: 'nearest' });
+    break;
+   }
+   case 'terminal-output' as never: { const e = event as unknown as { id: string; text: string }; transcript.terminalOutput(e.id, e.text); break; }
    case 'done':
-    transcript.endStream(); busy(false); waiting = false;
+    transcript.endStream(); busy(false);
     root.querySelectorAll('.agent-permission').forEach(el => el.remove());
+    // Pedidos de terminal ainda abertos ao fim do turno foram recusados pelo host.
+    for (const i of transcript.items) if (i.kind === 'terminal' && i.status === 'waiting') transcript.terminal(i.id, { status: 'rejected' });
+    waiting = pendingApprovals();
     if (event.error) transcript.add({ kind: 'error', text: event.error });
     else if (event.stopReason === 'cancelled') transcript.add({ kind: 'note', text: 'Interrompido.' });
     hooks.status(event.error ? tr('Falha no agente') : tr('Resposta concluída'));

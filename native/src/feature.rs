@@ -4,6 +4,7 @@ fn s(v: &serde_json::Value) -> Result<&str, String> {
 use crate::{
     history::History,
     prompt::{self, Capabilities},
+    terminal::{self, Terminals},
     rpc::{Handler, Rpc},
     workspace::{self, err, Res},
 };
@@ -52,6 +53,7 @@ struct Data {
     changes: Mutex<HashMap<String, Value>>,
     permissions: Mutex<HashMap<String, oneshot::Sender<Option<String>>>>,
     running: AtomicBool,
+    terminals: Terminals,
 }
 struct Session {
     id: String,
@@ -145,6 +147,35 @@ impl Data {
                     json!({"outcome":if let Some(option)=choice{json!({"outcome":"selected","optionId":option})}else{json!({"outcome":"cancelled"})}}),
                 )
             }
+            // Terminal do agente: nada roda sem a aprovação explícita do usuário para este comando.
+            "terminal/create" => {
+                let req = terminal::Request::parse(&self.root, params)?;
+                let id = uuid::Uuid::new_v4().to_string();
+                let cwd = req.cwd.strip_prefix(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                let rx = self.terminals.ask(&id)?;
+                emit(&self.app, json!({"type":"terminal","id":id,"command":terminal::display(&req.command,&req.args),"cwd":cwd,"status":"waiting"}));
+                if !rx.await.unwrap_or(false) {
+                    emit(&self.app, json!({"type":"terminal","id":id,"status":"rejected"}));
+                    return Err("O usuário recusou executar este comando".into());
+                }
+                emit(&self.app, json!({"type":"terminal","id":id,"status":"running"}));
+                let (app, tid) = (self.app.clone(), id.clone());
+                let chunk = Arc::new(move |text: &str| emit(&app, json!({"type":"terminal-output","id":tid,"text":text})));
+                let (app, tid) = (self.app.clone(), id.clone());
+                let exited = Arc::new(move |v: &Value| emit(&app, json!({"type":"terminal","id":tid,"status":if v["signal"].is_string(){"killed"}else{"exited"},"exitCode":v["exitCode"],"signal":v["signal"]})));
+                if let Err(e) = self.terminals.spawn(&id, req, chunk, exited) {
+                    emit(&self.app, json!({"type":"terminal","id":id,"status":"exited","exitCode":null,"error":e}));
+                    return Err(e);
+                }
+                Ok(json!({"terminalId":id}))
+            }
+            "terminal/output" => self.terminals.output(s(&params["terminalId"])?),
+            "terminal/wait_for_exit" => {
+                let v = self.terminals.wait(s(&params["terminalId"])?).await?;
+                Ok(json!({"exitCode":v["exitCode"],"signal":v["signal"]}))
+            }
+            "terminal/kill" => self.terminals.kill(s(&params["terminalId"])?).map(|_| json!({})),
+            "terminal/release" => self.terminals.release(s(&params["terminalId"])?).map(|_| json!({})),
             _ => Err("Recurso do cliente não disponível".into()),
         }
     }
@@ -207,6 +238,7 @@ impl Data {
                 let _ = tx.send(None);
             }
         }
+        self.terminals.deny_pending();
     }
 }
 impl Agents {
@@ -225,6 +257,7 @@ impl Agents {
                 changes: Mutex::new(HashMap::new()),
                 permissions: Mutex::new(HashMap::new()),
                 running: AtomicBool::new(false),
+                terminals: Terminals::default(),
             }),
         }
     }
@@ -235,6 +268,7 @@ impl Agents {
             }
         }
         self.data.cancel_permissions();
+        self.data.terminals.stop_all();
     }
     pub async fn start(&self, id: &str, tools: &Path) -> Res<Value> {
         let mut state = self.state.lock().await;
@@ -242,6 +276,7 @@ impl Agents {
             old.rpc.stop();
         }
         self.data.cancel_permissions();
+        self.data.terminals.stop_all();
         self.data.changes.lock().map_err(err)?.clear();
         self.data.changes();
         self.data.running.store(false, Ordering::Release);
@@ -324,7 +359,7 @@ impl Agents {
             );
             s(&session["thread"]["id"])?.to_string()
         } else {
-            let init=rpc.request("initialize",json!({"protocolVersion":1,"clientInfo":{"name":"php-ide","title":"PHP IDE","version":"0.2.0"},"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true},"terminal":false}}),60).await?;
+            let init=rpc.request("initialize",json!({"protocolVersion":1,"clientInfo":{"name":"php-ide","title":"PHP IDE","version":"0.2.0"},"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true},"terminal":true}}),60).await?;
             caps = Capabilities::from(&init);
             let session = rpc
                 .request(
@@ -386,6 +421,14 @@ impl Agents {
             "agentHistoryRename" => return self.history.rename(s(a(0))?, s(a(1))?),
             "agentHistoryDelete" => return self.history.delete(a(0).as_str()),
             _ => {}
+        }
+        if method == "agentTerminalDecision" {
+            self.data.terminals.decide(s(a(0))?, a(1).as_bool() == Some(true))?;
+            return Ok(Value::Null);
+        }
+        if method == "agentTerminalKill" {
+            self.data.terminals.kill(s(a(0))?)?;
+            return Ok(Value::Null);
         }
         if method == "agentPermission" {
             let tx = self
@@ -581,6 +624,7 @@ impl Drop for Agents {
             }
         }
         self.data.cancel_permissions();
+        self.data.terminals.stop_all();
     }
 }
 
