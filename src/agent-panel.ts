@@ -39,7 +39,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 <div class="agent-welcome"><span class="agent-emblem">✧</span><h2>Vamos construir?</h2><p>Conecte um agente para entender o projeto, explorar código e propor alterações.</p><div class="agent-examples"><button type="button" data-prompt="Explique a arquitetura deste projeto">Explorar o projeto ↗</button><button type="button" data-prompt="Revise o arquivo ativo e sugira melhorias">Revisar código ↗</button></div><small>Você revisa as alterações antes de gravá-las.</small></div>
 <div id="agent-transcript" role="log" aria-live="polite" aria-label="Conversa com o agente"></div>
 <section id="agent-changes" hidden><div class="agent-changes-head"><strong>Alterações pendentes (<span id="agent-change-count">0</span>)</strong><button id="agent-keep-all">Manter tudo</button><button id="agent-discard-all">Descartar tudo</button></div><ul id="agent-change-list"></ul></section>
-<div class="agent-input"><textarea id="agent-prompt" placeholder="Digite sua tarefa, use @ para adicionar arquivos ou / para comandos" aria-label="Pedido ao agente (Enter envia, Shift+Enter quebra linha)" disabled></textarea><div id="agent-chips" class="agent-chips" hidden></div>
+<div class="agent-input"><textarea id="agent-prompt" placeholder="Digite sua tarefa, use @ para adicionar arquivos ou / para comandos" aria-label="Pedido ao agente (Enter envia, Shift+Enter quebra linha)" disabled></textarea><div id="agent-command-hint" class="agent-command-hint" hidden></div><div id="agent-chips" class="agent-chips" hidden></div>
 <div class="agent-actions"><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
@@ -58,7 +58,16 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   const s = host?.editor?.getSelection?.();
   return s ? { ...context, selectionRange: { startLine: s.startLineNumber, endLine: s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber } } : context;
  }
+ let commands: { name: string; description: string; hint?: string | null }[] = [];
  const input = composer($<HTMLTextAreaElement>('agent-prompt'), $('agent-chips'), {
+  // Comandos "/" vêm do agente (ACP available_commands_update), como no modo agente do AI Chat.
+  commands: query => {
+   const q = query.toLowerCase();
+   return commands.filter(c => c.name.toLowerCase().startsWith(q)).concat(commands.filter(c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q)))
+    .map(c => ({ label: `/${c.name}`, hint: c.description, insert: `/${c.name}` }));
+  },
+  changed: () => commandHint(),
+  known: name => commands.some(c => c.name === name),
   mentions: mentionProvider({
    listFiles: () => api.listFiles('', false),
    searchSymbols: (query: string) => api.searchSymbols(query),
@@ -69,6 +78,12 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   }),
  });
  own(() => input.dispose());
+ /** Dica do argumento do comando digitado (ACP `input.hint`). */
+ function commandHint() {
+  const name = $<HTMLTextAreaElement>('agent-prompt').value.match(/^\/([\w:.-]+)\s/)?.[1];
+  const hint = commands.find(c => c.name === name)?.hint;
+  $('agent-command-hint').hidden = !hint; $('agent-command-hint').textContent = hint ? `/${name} ${hint}` : '';
+ }
  let projectRoot = '';
  void api.workspace?.().then((w: { root: string }) => { projectRoot = w.root; }).catch(() => {});
  $('agent-chips').addEventListener('agent-open-attachment', event => {
@@ -219,7 +234,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   generation.handle(event);
   switch (event.type) {
    case 'session': {
-    started = true; busy(false); agentId = event.agent;
+    started = true; busy(false); agentId = event.agent; commands = []; input.refresh();
     const name = agents.find(a => a.id === event.agent)?.name ?? event.agent;
     $('agent-detail').textContent = `${name} conectado${event.protocol ? ` · ACP v${event.protocol}` : ''}`;
     const mode = $<HTMLSelectElement>('agent-mode'); mode.replaceChildren(...event.modes.map(m => new Option(m.name, m.id, false, m.id === event.mode)));
@@ -231,6 +246,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
    case 'tool': transcript.tool(event.id, { title: event.title ?? undefined, status: event.status ?? undefined, toolKind: event.kind ?? undefined }); break;
    case 'plan': transcript.plan(event.entries.map(e => ({ content: e.content, status: e.status }))); break;
    case 'mode': $<HTMLSelectElement>('agent-mode').value = event.current; break;
+   case 'commands': commands = (event as any).commands; input.refresh(); commandHint(); break;
    case 'permission': {
     transcript.endStream(); waiting = true; history.refresh();
     const box = document.createElement('div'); box.className = 'agent-block agent-permission'; const title = document.createElement('p'); title.textContent = `Permitir: ${event.title}?`; box.replaceChildren(title);

@@ -13,7 +13,7 @@ export type Suggestion = {
  mention?: Mention;
 };
 export type Provider = (query: string, signal: AbortSignal) => Promise<Suggestion[]> | Suggestion[];
-type Options = { mentions: Provider; commands?: Provider; changed?(): void };
+type Options = { mentions: Provider; commands?: Provider; changed?(): void; /** Comando conhecido (realçado no início do texto). */ known?(name: string): boolean };
 
 type Token = { start: number; end: number; text: string; trigger: '@' | '/' };
 
@@ -44,7 +44,7 @@ export function composer(textarea: HTMLTextAreaElement, chips: HTMLElement, opti
   // Tokens válidos: menções registradas (com ficha) e o comando inicial.
   let html = escape(textarea.value);
   const marks = new Set(mentions.map(m => m.token));
-  const first = textarea.value.match(/^\/[\w:.-]+/)?.[0]; if (first && options.commands) marks.add(first);
+  const first = textarea.value.match(/^\/([\w:.-]+)(?=\s|$)/); if (first && options.known?.(first[1])) marks.add(first[0]);
   for (const mark of [...marks].sort((a, b) => b.length - a.length)) html = html.split(escape(mark)).join(`<mark>${escape(mark)}</mark>`);
   backdrop.innerHTML = html + '\n';
   backdrop.scrollTop = textarea.scrollTop;

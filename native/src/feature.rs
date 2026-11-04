@@ -168,6 +168,20 @@ impl Data {
                     &self.app,
                     json!({"type":"plan","entries":update["entries"]}),
                 ),
+                // Comandos "/" anunciados pelo agente (nome, descrição e dica do argumento).
+                "available_commands_update" => {
+                    let commands = update["availableCommands"]
+                        .as_array()
+                        .map(|list| {
+                            list.iter()
+                                .filter(|c| c["name"].is_string())
+                                .take(200)
+                                .map(|c| json!({"name":c["name"],"description":c["description"].as_str().unwrap_or(""),"hint":c["input"]["hint"]}))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    emit(&self.app, json!({"type":"commands","commands":commands}));
+                }
                 "current_mode_update" => emit(
                     &self.app,
                     json!({"type":"mode","current":update["currentModeId"]}),
