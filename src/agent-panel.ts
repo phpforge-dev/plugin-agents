@@ -6,7 +6,8 @@ import {composer, type Mention} from './composer';
 import {mentionProvider, fileItem, schemaSuggestions, type DatabaseEntry} from './mentions';
 import {attachmentMenu, readImage} from './attachments';
 import {renderMessage} from './snippets';
-import {tr,msg,html,monaco,own,host,service} from './sdk';
+import {findInChat} from './find';
+import {tr,msg,html,monaco,own,host,service,keymap} from './sdk';
 
 type Hooks = {
  /** Arquivo ativo (somente arquivos reais) e seleção, para o contexto da IDE. */
@@ -55,6 +56,19 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
  const snippetContext = { monaco, host, language: (path: string) => hooks.language(path), status: (text: string) => hooks.status(text), own };
  const transcript = new Transcript($('agent-transcript'), { terminal: (el, item) => renderTerminal(el, item), message: (el, text) => renderMessage(el, text, snippetContext) });
  const welcome = root.querySelector<HTMLElement>('.agent-welcome')!;
+ // Buscar na conversa (Find in Chat): ⌘F/Ctrl+F dentro do chat ou ⋮ › Buscar na conversa.
+ const find = findInChat($('agent-transcript'), welcome);
+ own(() => find.dispose());
+ const inChat = (target: Element | null) => !!target?.closest('#agent-chat') && $('agent-history').hidden;
+ if (keymap?.defineContext && keymap?.registerAction) {
+  own(keymap.defineContext('agent-chat', inChat));
+  own(keymap.registerAction({ id: 'agent.findInChat', label: 'Buscar na conversa', category: 'Agente', aliases: 'find in chat search conversation', context: 'agent-chat', defaults: { mac: 'Meta+F', other: 'Ctrl+F' }, run: () => find.open() }));
+ }
+ // Sem o keymap da IDE (ou com ele desativado), o próprio painel atende ao atalho.
+ root.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.key.toLowerCase() !== 'f' || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || !inChat(event.target as Element)) return;
+  event.preventDefault(); find.open();
+ });
  let agents: AgentInfo[] = []; let started = false; let running = false; let agentId = '';
  let changes: AgentChange[] = [];
  /** Conversa atual: id do histórico (criado no primeiro pedido) e se veio do histórico sem sessão viva. */
@@ -223,7 +237,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
  /** Começa uma conversa vazia; a sessão viva do agente é recriada para não carregar o contexto anterior. */
  async function fresh(restart: boolean) {
   await save();
-  transcript.clear(); welcome.hidden = false; conversation = { restored: false }; waiting = false;
+  transcript.clear(); welcome.hidden = false; conversation = { restored: false }; waiting = false; find.refresh();
   if (restart && started) { try { await api.agentReset(); } catch (error) { hooks.status(String(error)); } }
  }
  $('agent-new').onclick = async () => {
@@ -238,7 +252,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   let data: { id: string; agent: string; items: Item[] };
   try { data = await api.agentHistoryLoad(id); } catch (error) { hooks.status(String(error)); return; }
   await fresh(true);
-  transcript.load(data.items); welcome.hidden = data.items.length > 0;
+  transcript.load(data.items); welcome.hidden = data.items.length > 0; find.refresh();
   conversation = { id: data.id, restored: true };
   if (data.agent && agents.some(a => a.id === data.agent && a.available) && !started) $<HTMLSelectElement>('agent-select').value = data.agent;
   showHistory(false);
@@ -246,9 +260,10 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
  $('agent-options').onclick = event => {
   const menu = document.createElement('div'); menu.className = 'agent-menu'; menu.setAttribute('role', 'menu');
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); menu.style.left = `${Math.max(4, rect.right - 220)}px`; menu.style.top = `${rect.bottom + 2}px`;
-  const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.textContent = tr('Excluir todas as conversas');
-  b.onclick = async () => { menu.remove(); await history.deleteAll(); if (!$('agent-history').hidden) void history.show(); };
-  menu.append(b); document.body.append(menu); b.focus();
+  const item = (label: string, shortcut: string, run: () => unknown) => { const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.innerHTML = '<span></span><kbd></kbd>'; b.firstElementChild!.textContent = label; b.lastElementChild!.textContent = shortcut; b.onclick = () => { menu.remove(); void run(); }; menu.append(b); return b; };
+  item(tr('Buscar na conversa'), keymap?.shortcut?.('agent.findInChat') || (navigator.platform?.startsWith('Mac') ? '⌘F' : 'Ctrl+F'), () => { showHistory(false); find.open(); });
+  item(tr('Excluir todas as conversas'), '', async () => { await history.deleteAll(); if (!$('agent-history').hidden) void history.show(); });
+  document.body.append(menu); (menu.firstElementChild as HTMLElement).focus();
   const close = (e: Event) => { if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   document.addEventListener('mousedown', close); menu.onkeydown = e => { if (e.key === 'Escape') menu.remove(); };
   own(() => menu.remove());

@@ -66,7 +66,7 @@ test('histórico por projeto: grava, lista, abre, continua, renomeia e exclui', 
  // Esc volta para a conversa; "Excluir todas as conversas" no menu de opções.
  $('#agent-history').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
  assert.equal($('#agent-history').hidden, true);
- $('#agent-options').click(); document.querySelector('.agent-menu button').click(); await tick();
+ $('#agent-options').click(); [...document.querySelectorAll('.agent-menu button')].find(b => b.textContent.startsWith('Excluir todas')).click(); await tick();
  assert.equal(histories.get('/project').size, 0);
  // Outro projeto: lista vazia.
  const other = fakeApi({histories, project: '/other'});

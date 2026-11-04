@@ -152,3 +152,12 @@
 .agent-apply header button{padding:4px 10px;border-radius:5px}
 .agent-apply header .primary{background:var(--ij-button-default);border-color:var(--ij-button-default);color:var(--ij-button-default-text)}
 .agent-diff{background:var(--panel,var(--raised));color:var(--text);border:1px solid var(--border);border-radius:8px}
+
+.agent-find{display:flex;align-items:center;gap:4px;padding:4px 6px;margin:0 0 6px;background:var(--raised);border:1px solid var(--border);border-radius:6px}
+.agent-find[hidden]{display:none}
+.agent-find-input{flex:1;min-width:0;background:transparent;border:0;color:var(--text);font:inherit;font-size:12px;outline:0;padding:2px 4px}
+.agent-find-empty .agent-find-input{color:var(--danger,#f75464)}
+.agent-find-count{font-size:11px;color:var(--muted);white-space:nowrap;min-width:3em;text-align:right}
+.agent-find .agent-icon{width:22px;height:22px;padding:0;font-size:13px}
+mark.agent-find-match{background:rgba(255,198,0,.28);color:inherit;border-radius:2px}
+mark.agent-find-match.agent-find-current{background:rgba(255,145,0,.75);color:#000}
