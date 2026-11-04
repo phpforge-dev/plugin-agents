@@ -7,6 +7,7 @@ import {mentionProvider, fileItem, schemaSuggestions, type DatabaseEntry} from '
 import {attachmentMenu, readImage} from './attachments';
 import {renderMessage} from './snippets';
 import {findInChat} from './find';
+import {dropFiles} from './drop';
 import {tr,msg,html,monaco,own,host,service,keymap} from './sdk';
 
 type Hooks = {
@@ -126,14 +127,21 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   const images = [...(event.clipboardData?.files ?? [])].filter(f => f.type.startsWith('image/'));
   if (!images.length) return; event.preventDefault(); images.forEach(attachImage);
  });
+ // Arrastar do sistema para o chat: a área inteira do chat aceita (data-file-drop avisa o host,
+ // que bloqueia drops de arquivo fora dessas áreas para a janela não navegar até o arquivo).
  const inputBox = root.querySelector<HTMLElement>('.agent-input')!;
- inputBox.addEventListener('dragover', event => { if ([...(event.dataTransfer?.items ?? [])].some(i => i.kind === 'file')) { event.preventDefault(); inputBox.classList.add('agent-drop'); } });
- inputBox.addEventListener('dragleave', () => inputBox.classList.remove('agent-drop'));
- inputBox.addEventListener('drop', event => {
-  inputBox.classList.remove('agent-drop');
-  const files = [...(event.dataTransfer?.files ?? [])]; if (!files.length) return;
+ const dropZone = $('agent-chat'); dropZone.dataset.fileDrop = 'true';
+ const hasFiles = (event: DragEvent) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+ let depth = 0;
+ dropZone.addEventListener('dragenter', event => { if (!hasFiles(event)) return; depth++; inputBox.classList.add('agent-drop'); });
+ dropZone.addEventListener('dragover', event => { if (!hasFiles(event)) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; inputBox.classList.add('agent-drop'); });
+ dropZone.addEventListener('dragleave', event => { if (!hasFiles(event)) return; if (--depth <= 0) { depth = 0; inputBox.classList.remove('agent-drop'); } });
+ dropZone.addEventListener('drop', event => {
+  depth = 0; inputBox.classList.remove('agent-drop');
+  if (!event.dataTransfer || !hasFiles(event)) return;
   event.preventDefault();
-  for (const file of files) { if (file.type.startsWith('image/')) attachImage(file); else hooks.status(msg`${file.name}: arraste imagens; para arquivos do projeto use @file: ou +`); }
+  if (!started) { hooks.status(tr('Inicie um agente para anexar arquivos.')); return; }
+  void dropFiles(event.dataTransfer, { listFiles: () => api.listFiles('', false), read: (path: string) => api.read(path), image: attachImage, attach: m => { input.attach(m); promptBox.focus(); }, status: hooks.status });
  });
  /** Dica do argumento do comando digitado (ACP `input.hint`). */
  function commandHint() {

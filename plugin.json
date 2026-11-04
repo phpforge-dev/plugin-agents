@@ -38,6 +38,7 @@
       "agentTerminalPolicySet",
       "agents",
       "listFiles",
+      "read",
       "searchSymbols",
       "workspace"
     ]

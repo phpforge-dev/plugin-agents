@@ -191,7 +191,8 @@ pub fn blocks(root: &Path, attachments: &[Value], caps: Capabilities) -> Res<(Ve
                     }
                     _ => {
                         let name = s(a, "name")?;
-                        if name.contains(['/', '\\']) || name.len() > 255 {
+                        // Pasta arrastada termina em "/"; fora isso, só um nome (sem caminho).
+                        if name.is_empty() || name.trim_end_matches('/').contains(['/', '\\']) || name.len() > 255 {
                             return Err("Nome de arquivo anexado inválido".into());
                         }
                         (format!("php-ide://attachment/{}", url::form_urlencoded::byte_serialize(name.as_bytes()).collect::<String>()), format!("Arquivo anexado {}", name), "attachment")
@@ -299,6 +300,7 @@ mod tests {
         assert_eq!(b[5]["resource"]["mimeType"], "text/markdown");
         assert!(plain.contains("<local-changes name=\"Alterações locais não commitadas\">"));
         assert!(blocks(&root, &[json!({"type":"dropped","name":"../x","text":"a"})], EMB).is_err());
+        assert!(blocks(&root, &[json!({"type":"dropped","name":"docs/","text":"Pasta docs"})], EMB).is_ok());
         assert!(blocks(&root, &[json!({"type":"commit","hash":"abc"})], EMB).is_err(), "sem texto resolvido");
     }
     #[test]
