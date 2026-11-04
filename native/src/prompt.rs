@@ -9,6 +9,7 @@ use std::path::Path;
 
 const MAX_ATTACHMENTS: usize = 20;
 const MAX_TEXT: usize = 1024 * 1024;
+const MAX_IMAGE: usize = 20 * 1024 * 1024;
 const MAX_FOLDER_ENTRIES: usize = 300;
 
 #[derive(Clone, Copy, Default)]
@@ -70,6 +71,10 @@ fn lines(text: &str, from: usize, to: usize) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+fn decoded_len(data: &str) -> usize {
+    data.len() / 4 * 3 - data.bytes().rev().take_while(|b| *b == b'=').count()
+}
+
 /// Blocos ACP e o texto equivalente (para o Codex, que recebe só texto).
 pub fn blocks(root: &Path, attachments: &[Value], caps: Capabilities) -> Res<(Vec<Value>, String)> {
     if attachments.len() > MAX_ATTACHMENTS {
@@ -161,6 +166,24 @@ pub fn blocks(root: &Path, attachments: &[Value], caps: Capabilities) -> Res<(Ve
                 out.extend(resource(caps, format!("php-ide://database/{}", label.replace(' ', "%20")), &name, "text/x-sql", text));
                 plain.push_str(&format!("\n<database-schema name=\"{}\">\n{}\n</database-schema>", label, text));
             }
+            "image" => {
+                if !caps.image {
+                    return Err("Este agente não aceita imagens (promptCapabilities.image)".into());
+                }
+                let mime = s(a, "mimeType")?;
+                if !["image/png", "image/jpeg", "image/gif", "image/webp"].contains(&mime) {
+                    return Err("Imagem deve ser PNG, JPEG, GIF ou WebP".into());
+                }
+                let data = s(a, "data")?;
+                if data.len() % 4 != 0 || !data.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=') {
+                    return Err("Imagem inválida".into());
+                }
+                if decoded_len(data) > MAX_IMAGE {
+                    return Err("Imagem acima de 20 MB".into());
+                }
+                out.push(json!({"type":"image","mimeType":mime,"data":data}));
+                plain.push_str(&format!("\n[imagem anexada: {}]", a["name"].as_str().unwrap_or("imagem")));
+            }
             _ => return Err("Tipo de anexo desconhecido".into()),
         }
     }
@@ -191,6 +214,7 @@ mod tests {
                 json!({"type":"symbol","name":"User","path":"src/User.php","line":2,"endLine":5}),
                 json!({"type":"selection","path":"src/User.php","text":"public $a;","line":4,"endLine":4}),
                 json!({"type":"schema","label":"public.users","text":"TABLE public.users (id bigint)"}),
+                json!({"type":"image","name":"tela.png","mimeType":"image/png","data":"iVBORw0KGgo="}),
             ],
             EMB,
         )
@@ -204,6 +228,7 @@ mod tests {
         assert!(blocks[4]["resource"]["uri"].as_str().unwrap().ends_with("#L2-L5"));
         assert_eq!(blocks[5]["resource"]["text"], "public $a;");
         assert_eq!(blocks[6]["resource"]["uri"], "php-ide://database/public.users");
+        assert_eq!(blocks[7], json!({"type":"image","mimeType":"image/png","data":"iVBORw0KGgo="}));
         assert!(plain.contains("<database-schema name=\"public.users\">"));
     }
     #[test]
@@ -214,11 +239,15 @@ mod tests {
         assert!(b[1]["text"].as_str().unwrap().contains("class User"));
     }
     #[test]
-    fn rejects_escapes_and_oversize() {
+    fn rejects_escapes_unsupported_images_and_oversize() {
         let (_d, root) = project();
         assert!(blocks(&root, &[json!({"type":"file","path":"../etc/passwd"})], EMB).is_err());
         assert!(blocks(&root, &[json!({"type":"file","path":"/etc/hosts","text":"x"})], EMB).is_err());
         assert!(blocks(&root, &[json!({"type":"folder","path":"src/User.php"})], EMB).is_err());
+        let image = json!({"type":"image","name":"a","mimeType":"image/png","data":"iVBORw0KGgo="});
+        assert!(blocks(&root, std::slice::from_ref(&image), Capabilities { image: false, embedded: true }).unwrap_err().contains("não aceita imagens"));
+        assert!(blocks(&root, &[json!({"type":"image","name":"a","mimeType":"image/svg+xml","data":"AAAA"})], EMB).is_err());
+        assert!(blocks(&root, &[json!({"type":"image","name":"a","mimeType":"image/png","data":"not base64!"})], EMB).is_err());
         let big = json!({"type":"schema","label":"x","text":"x".repeat(MAX_TEXT + 1)});
         assert!(blocks(&root, &[big], EMB).is_err());
         assert!(blocks(&root, &vec![json!({"type":"schema","label":"x","text":"x"}); 21], EMB).is_err());

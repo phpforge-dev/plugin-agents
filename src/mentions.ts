@@ -20,7 +20,7 @@ function score(path: string, query: string) {
  if (name.startsWith(q)) return 4; if (name.includes(q)) return 3; if (full.includes(q)) return 2;
  let i = 0; for (const c of full) if (c === q[i]) i++; return i === q.length ? 1 : 0;
 }
-const fileItem = (path: string): Suggestion => ({ label: base(path), hint: dir(path), icon: '▤', insert: `@file:${base(path)}`, mention: { kind: 'file', label: base(path), path } });
+export const fileItem = (path: string): Suggestion => ({ label: base(path), hint: dir(path), icon: '▤', insert: `@file:${base(path)}`, mention: { kind: 'file', label: base(path), path } });
 
 /** Texto do schema (tabelas e colunas) enviado ao agente; só metadados já carregados pelo plugin Database. */
 export function schemaText(entry: DatabaseEntry, schema: string, table?: string) {
@@ -30,6 +30,16 @@ export function schemaText(entry: DatabaseEntry, schema: string, table?: string)
  for (const t of tables.slice(0, 400)) lines.push(`${t.kind === 'view' ? 'VIEW' : 'TABLE'} ${schema}.${t.name} (${t.columns.map(c => `${c.name} ${c.type}${c.nullable === false ? ' NOT NULL' : ''}`).join(', ')})`);
  if (tables.length > 400) lines.push(`-- … ${tables.length - 400} tabelas omitidas`);
  return lines.join('\n');
+}
+
+/** Schemas e tabelas dos bancos conectados no plugin Database (metadados já carregados, sem credenciais). */
+export function schemaSuggestions(entries: DatabaseEntry[], q: string): Suggestion[] {
+ const out: Suggestion[] = []; const lower = q.toLowerCase();
+ for (const entry of entries) for (const schema of entry.model.schemas) {
+  if (!lower || schema.name.toLowerCase().includes(lower)) out.push({ label: schema.name, hint: `schema · ${entry.session.label}`, icon: '⛁', insert: `@dbObject:${schema.name}`, mention: { kind: 'schema', label: schema.name, path: `${entry.session.label}/${schema.name}`, text: schemaText(entry, schema.name) } });
+  for (const table of schema.tables) if (!lower || `${schema.name}.${table.name}`.toLowerCase().includes(lower)) out.push({ label: `${schema.name}.${table.name}`, hint: `${table.kind === 'view' ? 'view' : 'tabela'} · ${entry.session.label}`, icon: '▦', insert: `@dbObject:${schema.name}.${table.name}`, mention: { kind: 'schema', label: `${schema.name}.${table.name}`, path: `${entry.session.label}/${schema.name}.${table.name}`, text: schemaText(entry, schema.name, table.name) } });
+ }
+ return out.slice(0, 50);
 }
 
 /**
@@ -81,14 +91,7 @@ export function mentionProvider(sources: Sources) {
     return { label: s.name, hint: `${s.containerName ? s.containerName + ' · ' : ''}${base(path)}`, icon: 'ⓢ', insert: `@symbol:${s.name}`, mention };
    });
   }
-  if (kind === 'dbObject') {
-   const out: Suggestion[] = []; const lower = q.toLowerCase();
-   for (const entry of sources.database()) for (const schema of entry.model.schemas) {
-    if (!lower || schema.name.toLowerCase().includes(lower)) out.push({ label: schema.name, hint: `schema · ${entry.session.label}`, icon: '⛁', insert: `@dbObject:${schema.name}`, mention: { kind: 'schema', label: schema.name, path: `${entry.session.label}/${schema.name}`, text: schemaText(entry, schema.name) } });
-    for (const table of schema.tables) if (!lower || `${schema.name}.${table.name}`.toLowerCase().includes(lower)) out.push({ label: `${schema.name}.${table.name}`, hint: `${table.kind === 'view' ? 'view' : 'tabela'} · ${entry.session.label}`, icon: '▦', insert: `@dbObject:${schema.name}.${table.name}`, mention: { kind: 'schema', label: `${schema.name}.${table.name}`, path: `${entry.session.label}/${schema.name}.${table.name}`, text: schemaText(entry, schema.name, table.name) } });
-   }
-   return out.slice(0, 50);
-  }
+  if (kind === 'dbObject') return schemaSuggestions(sources.database(), q);
   return [];
  };
 }

@@ -115,3 +115,13 @@
 .agent-image-preview img{max-width:100%;max-height:70vh;display:block}
 .agent-command-hint{font-size:11px;color:var(--muted);padding:0 6px 2px;font-family:var(--mono,monospace)}
 .agent-command-hint[hidden]{display:none}
+/* AI-ACP-001: anexos (+), menu de anexos e área de soltar. */
+.agent-actions #agent-attach{background:transparent;border:0;color:var(--text);font-size:16px;padding:2px 7px}
+.agent-actions #agent-attach:hover,.agent-actions #agent-attach[aria-expanded=true]{background:var(--raised)}
+.agent-attach-menu{width:300px;max-height:380px;padding:6px}
+.agent-attach-search{width:100%;box-sizing:border-box;padding:5px 8px;margin-bottom:4px;border-radius:5px}
+.agent-attach-body{overflow:auto;display:flex;flex-direction:column}
+.agent-attach-item{display:flex!important;align-items:center;gap:8px!important;justify-content:flex-start!important;white-space:nowrap}
+.agent-attach-item:disabled{opacity:.5;cursor:default}
+.agent-attach-section{color:var(--muted);font-size:11px;padding:6px 10px 2px}
+.agent-input.agent-drop{border-color:var(--accent);border-style:dashed}

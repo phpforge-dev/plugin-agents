@@ -3,7 +3,8 @@ import {historyView} from './history-view';
 import {newId, transcriptText, type Item, type Summary} from './model';
 import {Transcript} from './transcript';
 import {composer, type Mention} from './composer';
-import {mentionProvider, type DatabaseEntry} from './mentions';
+import {mentionProvider, fileItem, schemaSuggestions, type DatabaseEntry} from './mentions';
+import {attachmentMenu, readImage} from './attachments';
 import {tr,msg,html,monaco,own,host,service} from './sdk';
 
 type Hooks = {
@@ -40,7 +41,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 <div id="agent-transcript" role="log" aria-live="polite" aria-label="Conversa com o agente"></div>
 <section id="agent-changes" hidden><div class="agent-changes-head"><strong>Alterações pendentes (<span id="agent-change-count">0</span>)</strong><button id="agent-keep-all">Manter tudo</button><button id="agent-discard-all">Descartar tudo</button></div><ul id="agent-change-list"></ul></section>
 <div class="agent-input"><textarea id="agent-prompt" placeholder="Digite sua tarefa, use @ para adicionar arquivos ou / para comandos" aria-label="Pedido ao agente (Enter envia, Shift+Enter quebra linha)" disabled></textarea><div id="agent-command-hint" class="agent-command-hint" hidden></div><div id="agent-chips" class="agent-chips" hidden></div>
-<div class="agent-actions"><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
+<div class="agent-actions"><button id="agent-attach" class="agent-icon" type="button" title="Adicionar anexo" aria-label="Adicionar anexo" aria-haspopup="menu" aria-expanded="false">+</button><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
  const transcript = new Transcript($('agent-transcript'));
@@ -59,6 +60,16 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   return s ? { ...context, selectionRange: { startLine: s.startLineNumber, endLine: s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber } } : context;
  }
  let commands: { name: string; description: string; hint?: string | null }[] = [];
+ let capabilities = { image: false, embeddedContext: false };
+ const databaseEntries = (): DatabaseEntry[] => { const entries = service('database')?.sqlIntelligence?.entries as Map<string, DatabaseEntry> | undefined; return entries ? [...entries.values()].filter(e => e?.model?.schemas) : []; };
+ const findMentions = mentionProvider({
+  listFiles: () => api.listFiles('', false),
+  searchSymbols: (query: string) => api.searchSymbols(query),
+  context: editorContext,
+  recent: () => { remember(hooks.context()?.path); return recent; },
+  database: () => databaseEntries(),
+  root: () => projectRoot,
+ });
  const input = composer($<HTMLTextAreaElement>('agent-prompt'), $('agent-chips'), {
   // Comandos "/" vêm do agente (ACP available_commands_update), como no modo agente do AI Chat.
   commands: query => {
@@ -68,16 +79,37 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   },
   changed: () => commandHint(),
   known: name => commands.some(c => c.name === name),
-  mentions: mentionProvider({
-   listFiles: () => api.listFiles('', false),
-   searchSymbols: (query: string) => api.searchSymbols(query),
-   context: editorContext,
-   recent: () => { remember(hooks.context()?.path); return recent; },
-   database: () => { const entries = service('database')?.sqlIntelligence?.entries as Map<string, DatabaseEntry> | undefined; return entries ? [...entries.values()].filter(e => e?.model?.schemas) : []; },
-   root: () => projectRoot,
-  }),
+  mentions: findMentions,
  });
  own(() => input.dispose());
+ // Anexos: botão +, imagem por seletor, colar ou arrastar (20 MB, PNG/JPEG/GIF/WebP), como no AI Chat.
+ const attachImage = (file: File) => {
+  if (!capabilities.image) { hooks.status(tr('O agente atual não aceita imagens.')); return; }
+  void readImage(file).then(m => input.attach(m), (error: Error) => hooks.status(String(error.message ?? error)));
+ };
+ const menu = attachmentMenu($<HTMLButtonElement>('agent-attach'), {
+  search: async (query, signal) => (await Promise.all([findMentions(`file:${query}`, signal), findMentions(`folder:${query}`, signal)])).flat().slice(0, 40),
+  recent: () => { remember(hooks.context()?.path); return recent.slice(0, 8).map(fileItem); },
+  schemas: () => schemaSuggestions(databaseEntries(), ''),
+  imageAllowed: () => capabilities.image,
+  attach: m => { input.attach(m); $<HTMLTextAreaElement>('agent-prompt').focus(); },
+  status: hooks.status,
+ });
+ own(() => menu.dispose());
+ const promptBox = $<HTMLTextAreaElement>('agent-prompt');
+ promptBox.addEventListener('paste', event => {
+  const images = [...(event.clipboardData?.files ?? [])].filter(f => f.type.startsWith('image/'));
+  if (!images.length) return; event.preventDefault(); images.forEach(attachImage);
+ });
+ const inputBox = root.querySelector<HTMLElement>('.agent-input')!;
+ inputBox.addEventListener('dragover', event => { if ([...(event.dataTransfer?.items ?? [])].some(i => i.kind === 'file')) { event.preventDefault(); inputBox.classList.add('agent-drop'); } });
+ inputBox.addEventListener('dragleave', () => inputBox.classList.remove('agent-drop'));
+ inputBox.addEventListener('drop', event => {
+  inputBox.classList.remove('agent-drop');
+  const files = [...(event.dataTransfer?.files ?? [])]; if (!files.length) return;
+  event.preventDefault();
+  for (const file of files) { if (file.type.startsWith('image/')) attachImage(file); else hooks.status(msg`${file.name}: arraste imagens; para arquivos do projeto use @file: ou +`); }
+ });
  /** Dica do argumento do comando digitado (ACP `input.hint`). */
  function commandHint() {
   const name = $<HTMLTextAreaElement>('agent-prompt').value.match(/^\/([\w:.-]+)\s/)?.[1];
@@ -235,6 +267,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   switch (event.type) {
    case 'session': {
     started = true; busy(false); agentId = event.agent; commands = []; input.refresh();
+    capabilities = { image: !!(event as any).capabilities?.image, embeddedContext: !!(event as any).capabilities?.embeddedContext };
     const name = agents.find(a => a.id === event.agent)?.name ?? event.agent;
     $('agent-detail').textContent = `${name} conectado${event.protocol ? ` · ACP v${event.protocol}` : ''}`;
     const mode = $<HTMLSelectElement>('agent-mode'); mode.replaceChildren(...event.modes.map(m => new Option(m.name, m.id, false, m.id === event.mode)));
