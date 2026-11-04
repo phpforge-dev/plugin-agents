@@ -2,7 +2,9 @@ import {agentGeneration} from './agent-generation';
 import {historyView} from './history-view';
 import {newId, transcriptText, type Item, type Summary} from './model';
 import {Transcript} from './transcript';
-import {tr,msg,html,monaco,own} from './sdk';
+import {composer, type Mention} from './composer';
+import {mentionProvider, type DatabaseEntry} from './mentions';
+import {tr,msg,html,monaco,own,host,service} from './sdk';
 
 type Hooks = {
  /** Arquivo ativo (somente arquivos reais) e seleção, para o contexto da IDE. */
@@ -12,7 +14,20 @@ type Hooks = {
  status(message: string): void;
  language(path: string): string | undefined;
 };
-type Extras = { history?: string };
+type Extras = { history?: string; attachments?: Record<string, unknown>[] };
+
+/** Anexo no formato do pedido nativo (o host lê arquivos/pastas confinados ao projeto). */
+function payload(m: Mention, context: ReturnType<Hooks['context']>): Record<string, unknown> | undefined {
+ switch (m.kind) {
+  case 'thisFile': return context && context.path === m.path ? { type: 'file', path: m.path, text: context.text } : { type: 'file', path: m.path };
+  case 'selection': return { type: 'selection', path: m.path, text: m.text, line: m.line, endLine: m.endLine };
+  case 'file': return { type: 'file', path: m.path };
+  case 'folder': return { type: 'folder', path: m.path };
+  case 'symbol': return { type: 'symbol', name: m.label, path: m.path, line: m.line, endLine: m.endLine };
+  case 'schema': return { type: 'schema', label: m.label, text: m.text };
+  case 'image': return { type: 'image', name: m.label, mimeType: m.mimeType, data: m.data };
+ }
+}
 
 /** Painel do agente: sessão ACP/Codex, transcrição, histórico por projeto, permissões e alterações pendentes com revisão. */
 export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
@@ -24,7 +39,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 <div class="agent-welcome"><span class="agent-emblem">✧</span><h2>Vamos construir?</h2><p>Conecte um agente para entender o projeto, explorar código e propor alterações.</p><div class="agent-examples"><button type="button" data-prompt="Explique a arquitetura deste projeto">Explorar o projeto ↗</button><button type="button" data-prompt="Revise o arquivo ativo e sugira melhorias">Revisar código ↗</button></div><small>Você revisa as alterações antes de gravá-las.</small></div>
 <div id="agent-transcript" role="log" aria-live="polite" aria-label="Conversa com o agente"></div>
 <section id="agent-changes" hidden><div class="agent-changes-head"><strong>Alterações pendentes (<span id="agent-change-count">0</span>)</strong><button id="agent-keep-all">Manter tudo</button><button id="agent-discard-all">Descartar tudo</button></div><ul id="agent-change-list"></ul></section>
-<div class="agent-input"><textarea id="agent-prompt" placeholder="Descreva a tarefa (Enter envia, Shift+Enter quebra linha)" disabled></textarea>
+<div class="agent-input"><textarea id="agent-prompt" placeholder="Digite sua tarefa, use @ para adicionar arquivos ou / para comandos" aria-label="Pedido ao agente (Enter envia, Shift+Enter quebra linha)" disabled></textarea><div id="agent-chips" class="agent-chips" hidden></div>
 <div class="agent-actions"><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
@@ -35,6 +50,40 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
  /** Conversa atual: id do histórico (criado no primeiro pedido) e se veio do histórico sem sessão viva. */
  let conversation: { id?: string; restored: boolean } = { restored: false };
  let waiting = false; let saving = Promise.resolve();
+ const recent: string[] = [];
+ const remember = (path?: string) => { if (!path) return; const i = recent.indexOf(path); if (i >= 0) recent.splice(i, 1); recent.unshift(path); recent.length = Math.min(recent.length, 20); };
+ /** Contexto do editor com o intervalo de linhas da seleção (para @selection). */
+ function editorContext() {
+  const context = hooks.context(); if (!context?.selection) return context;
+  const s = host?.editor?.getSelection?.();
+  return s ? { ...context, selectionRange: { startLine: s.startLineNumber, endLine: s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber } } : context;
+ }
+ const input = composer($<HTMLTextAreaElement>('agent-prompt'), $('agent-chips'), {
+  mentions: mentionProvider({
+   listFiles: () => api.listFiles('', false),
+   searchSymbols: (query: string) => api.searchSymbols(query),
+   context: editorContext,
+   recent: () => { remember(hooks.context()?.path); return recent; },
+   database: () => { const entries = service('database')?.sqlIntelligence?.entries as Map<string, DatabaseEntry> | undefined; return entries ? [...entries.values()].filter(e => e?.model?.schemas) : []; },
+   root: () => projectRoot,
+  }),
+ });
+ own(() => input.dispose());
+ let projectRoot = '';
+ void api.workspace?.().then((w: { root: string }) => { projectRoot = w.root; }).catch(() => {});
+ $('agent-chips').addEventListener('agent-open-attachment', event => {
+  const m = (event as CustomEvent<Mention>).detail;
+  if (m.kind === 'image' && m.data) { previewImage(m); return; }
+  if (m.path && m.kind !== 'folder' && m.kind !== 'schema') void host?.open?.(m.path, m.line ? m.line - 1 : undefined);
+ });
+ function previewImage(m: Mention) {
+  const dialog = document.createElement('dialog'); dialog.className = 'agent-image-preview';
+  const img = document.createElement('img'); img.src = `data:${m.mimeType};base64,${m.data}`; img.alt = m.label;
+  const close = document.createElement('button'); close.textContent = tr('Fechar'); close.onclick = () => { dialog.close(); dialog.remove(); };
+  const head = document.createElement('header'); const name = document.createElement('strong'); name.textContent = m.label; head.append(name, close);
+  dialog.append(head, img); document.body.append(dialog); own(() => dialog.remove()); dialog.showModal();
+  dialog.addEventListener('close', () => dialog.remove());
+ }
 
  function busy(value: boolean) {
   for (const id of ['agent-select', 'agent-start', 'agent-mode']) $<HTMLButtonElement>(id).disabled = value;
@@ -117,18 +166,22 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   if (!text || running || !started) return;
   const context = $<HTMLInputElement>('agent-context').checked ? hooks.context() : undefined;
   const extras: Extras = {};
+  const mentioned = input.mentions();
+  const live = hooks.context();
+  if (mentioned.length) extras.attachments = mentioned.map(m => payload(m, live)).filter(Boolean) as Record<string, unknown>[];
+  for (const m of mentioned) if (m.kind === 'file' || m.kind === 'thisFile') remember(m.path);
   // Conversa restaurada: a sessão nova do agente recebe a conversa anterior uma única vez.
   if (conversation.restored && transcript.items.length) extras.history = transcriptText(transcript.items);
   conversation.id ??= newId(); conversation.restored = false;
   welcome.hidden = true; transcript.endStream();
-  transcript.add({ kind: 'user', text });
+  transcript.add({ kind: 'user', text, ...(mentioned.length ? { attachments: mentioned.map(m => ({ kind: m.kind, label: m.label, ...(m.path ? { path: m.path } : {}) })) } : {}) });
   if (context) transcript.add({ kind: 'note', text: `Contexto: ${context.path}${context.selection ? tr(' (com seleção)') : ''}` });
-  prompt.value = ''; busy(true); void save();
+  input.clear(); busy(true); void save();
   try { await api.agentPrompt(text, context, extras); } catch (error) { transcript.add({ kind: 'error', text: String((error as Error).message ?? error) }); busy(false); void save(); }
  }
  root.querySelectorAll<HTMLButtonElement>('[data-prompt]').forEach(button => { button.onclick = () => { const prompt = $<HTMLTextAreaElement>('agent-prompt'); if (!started) { $('agent-detail').textContent = tr('Selecione um agente disponível e clique em Iniciar.'); return; } prompt.value = button.dataset.prompt!; prompt.focus(); }; });
  $('agent-send').onclick = () => void send();
- $('agent-prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void send(); } });
+ $('agent-prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !input.open) { event.preventDefault(); void send(); } });
  $('agent-cancel').onclick = () => void api.agentCancel().catch((error: unknown) => hooks.status(String(error)));
 
  function diff(change: AgentChange) {

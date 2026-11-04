@@ -85,3 +85,31 @@
 .agent-menu button:hover,.agent-menu button:focus{background:var(--selection);outline:0}
 .agent-menu kbd{color:var(--muted);font-family:inherit;font-size:11px}
 .agent-user-text{white-space:pre-wrap}
+/* AI-ACP-001: campo com realce de tokens (@file:…, /comando), popup de conclusão e fichas de contexto. */
+.agent-editor{position:relative}
+.agent-highlight,.agent-editor textarea{font:inherit;font-size:12px;line-height:1.5;padding:5px!important;letter-spacing:normal;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;box-sizing:border-box}
+.agent-highlight{position:absolute;inset:0;color:transparent;pointer-events:none;overflow:hidden;border:0}
+.agent-highlight mark{background:var(--selection);color:transparent;border-radius:3px;box-shadow:0 0 0 1px var(--border)}
+.agent-editor textarea{position:relative;background:transparent!important}
+.agent-chips{display:flex;flex-wrap:wrap;gap:6px;padding:4px 2px}
+.agent-chips[hidden]{display:none}
+.agent-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:5px;padding:1px 2px 1px 6px;font-size:11px;background:var(--raised);max-width:100%}
+.agent-chip img{width:18px;height:18px;object-fit:cover;border-radius:3px}
+.agent-chip-label{background:transparent;border:0;color:var(--text);padding:1px 2px;cursor:pointer;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-chip-remove{background:transparent;border:0;color:var(--muted);cursor:pointer;padding:0 4px;font-size:13px;line-height:1}
+.agent-chip-remove:hover{color:var(--text)}
+.agent-sent-attachments{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.agent-sent-attachments .agent-chip{padding:1px 6px}
+.agent-popup{position:fixed;z-index:1001;max-height:300px;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--border);border-radius:7px;box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:12px;overflow:hidden}
+.agent-popup[hidden]{display:none}
+.agent-popup-list{overflow:auto;padding:3px 0}
+.agent-popup-item{display:flex;align-items:center;gap:8px;padding:3px 10px;cursor:pointer;white-space:nowrap}
+.agent-popup-item[aria-selected=true]{background:var(--selection)}
+.agent-popup-icon{width:14px;text-align:center;color:var(--muted)}
+.agent-popup-label{color:var(--text)}
+.agent-popup-hint{margin-left:auto;color:var(--muted);overflow:hidden;text-overflow:ellipsis;padding-left:16px}
+.agent-popup-empty{padding:6px 10px;color:var(--muted)}
+.agent-popup-footer{border-top:1px solid var(--border);padding:4px 10px;color:var(--muted);font-size:11px}
+.agent-image-preview{max-width:80vw;max-height:80vh;background:var(--raised);color:var(--text);border:1px solid var(--border);border-radius:8px}
+.agent-image-preview header{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px}
+.agent-image-preview img{max-width:100%;max-height:70vh;display:block}

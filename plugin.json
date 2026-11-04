@@ -31,7 +31,10 @@
       "agentPrompt",
       "agentReset",
       "agentStart",
-      "agents"
+      "agents",
+      "listFiles",
+      "searchSymbols",
+      "workspace"
     ]
   }
 }

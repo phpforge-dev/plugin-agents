@@ -3,6 +3,7 @@ fn s(v: &serde_json::Value) -> Result<&str, String> {
 }
 use crate::{
     history::History,
+    prompt::{self, Capabilities},
     rpc::{Handler, Rpc},
     workspace::{self, err, Res},
 };
@@ -57,6 +58,7 @@ struct Session {
     rpc: Arc<Rpc>,
     session: String,
     turn: Arc<Mutex<Option<String>>>,
+    caps: Capabilities,
 }
 pub struct Agents {
     state: tokio::sync::Mutex<Option<Session>>,
@@ -284,6 +286,7 @@ impl Agents {
             notify,
             request,
         )?;
+        let mut caps = Capabilities::default();
         let opened: Res<String> = async {
         let session = if id == "codex" {
             rpc.request(
@@ -308,6 +311,7 @@ impl Agents {
             s(&session["thread"]["id"])?.to_string()
         } else {
             let init=rpc.request("initialize",json!({"protocolVersion":1,"clientInfo":{"name":"php-ide","title":"PHP IDE","version":"0.2.0"},"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true},"terminal":false}}),60).await?;
+            caps = Capabilities::from(&init);
             let session = rpc
                 .request(
                     "session/new",
@@ -317,7 +321,7 @@ impl Agents {
                 .await?;
             emit(
                 &self.data.app,
-                json!({"type":"session","agent":id,"protocol":init["protocolVersion"],"modes":session["modes"]["availableModes"].as_array().cloned().unwrap_or_default(),"mode":session["modes"]["currentModeId"]}),
+                json!({"type":"session","agent":id,"protocol":init["protocolVersion"],"modes":session["modes"]["availableModes"].as_array().cloned().unwrap_or_default(),"mode":session["modes"]["currentModeId"],"capabilities":{"image":caps.image,"embeddedContext":caps.embedded}}),
             );
             s(&session["sessionId"])?.to_string()
         };
@@ -342,6 +346,7 @@ impl Agents {
             rpc,
             session,
             turn: Arc::new(Mutex::new(None)),
+            caps,
         });
         Ok(Value::Null)
     }
@@ -483,6 +488,12 @@ impl Agents {
                         );
                     }
                     codex.push_str(&format!("\n<editor-buffer>\n{}\n</editor-buffer>", content));
+                }
+                // Menções @ e anexos: arquivos/pastas lidos aqui, confinados ao projeto.
+                if let Some(attachments) = a(2)["attachments"].as_array() {
+                    let (extra, plain) = prompt::blocks(&self.data.root, attachments, session.caps)?;
+                    blocks.extend(extra);
+                    codex.push_str(&plain);
                 }
                 // Conversa restaurada do histórico: a sessão nova recebe a conversa anterior antes do pedido.
                 if let Some(previous) = a(2)["history"].as_str().filter(|t| !t.trim().is_empty()) {
