@@ -5,6 +5,7 @@ import {Transcript} from './transcript';
 import {composer, type Mention} from './composer';
 import {mentionProvider, fileItem, schemaSuggestions, type DatabaseEntry} from './mentions';
 import {attachmentMenu, readImage} from './attachments';
+import {renderMessage} from './snippets';
 import {tr,msg,html,monaco,own,host,service} from './sdk';
 
 type Hooks = {
@@ -45,7 +46,8 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
  const liveTerminals = new Set<string>();
- const transcript = new Transcript($('agent-transcript'), { terminal: (el, item) => renderTerminal(el, item) });
+ const snippetContext = { monaco, host, language: (path: string) => hooks.language(path), status: (text: string) => hooks.status(text), own };
+ const transcript = new Transcript($('agent-transcript'), { terminal: (el, item) => renderTerminal(el, item), message: (el, text) => renderMessage(el, text, snippetContext) });
  const welcome = root.querySelector<HTMLElement>('.agent-welcome')!;
  let agents: AgentInfo[] = []; let started = false; let running = false; let agentId = '';
  let changes: AgentChange[] = [];

@@ -140,3 +140,15 @@
 .agent-terminal-actions button{padding:4px 10px;border-radius:5px}
 .agent-terminal-actions .primary{background:var(--ij-button-default);border-color:var(--ij-button-default);color:var(--ij-button-default-text)}
 .agent-terminal-output{max-height:220px;overflow:auto;background:var(--bg,#0000);border-top:1px solid var(--border);padding-top:4px;color:var(--text)}
+/* AI-ACP-001: blocos de código das respostas com Aplicar (prévia), Inserir no cursor e Copiar. */
+.agent-message{white-space:normal}
+.agent-text{white-space:pre-wrap}
+.agent-code{border:1px solid var(--border);border-radius:6px;margin:6px 0;overflow:hidden}
+.agent-code-head{display:flex;align-items:center;gap:4px;padding:3px 6px;background:var(--raised);font-size:11px}
+.agent-code-lang{margin-right:auto;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-code-head button{background:transparent;border:0;color:var(--text);padding:2px 6px;border-radius:4px;font-size:11px;cursor:pointer}
+.agent-code-head button:hover{background:var(--selection)}
+.agent-code pre{margin:0;padding:6px 8px;overflow:auto;max-height:360px;font-family:var(--mono,monospace);font-size:11.5px;white-space:pre}
+.agent-apply header button{padding:4px 10px;border-radius:5px}
+.agent-apply header .primary{background:var(--ij-button-default);border-color:var(--ij-button-default);color:var(--ij-button-default-text)}
+.agent-diff{background:var(--panel,var(--raised));color:var(--text);border:1px solid var(--border);border-radius:8px}
