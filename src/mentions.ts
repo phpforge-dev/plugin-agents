@@ -8,6 +8,10 @@ type Sources = {
  recent(): string[];
  database(): DatabaseEntry[];
  root(): string;
+ /** `@commit:` e `@rule:` resolvidos pelo host (git log e .aiassistant/rules). */
+ list?(kind: 'commit' | 'rule', query: string): Promise<any[]>;
+ /** Problemas do arquivo aberto (marcadores do editor), para `@problems`. */
+ problems?(): { path: string; text: string; count: number } | undefined;
 };
 export type DatabaseEntry = { session: { id: string; label: string; driver?: string }; model: { database?: string; schemas: { name: string; tables: { name: string; kind: string; columns: { name: string; type: string; nullable?: boolean }[] }[] }[] } };
 
@@ -56,6 +60,11 @@ export function mentionProvider(sources: Sources) {
   { label: '@folder:', hint: 'Adicionar uma pasta ao contexto', insert: '@folder:', category: true },
   { label: '@symbol:', hint: 'Adicionar um símbolo (classe, método…)', insert: '@symbol:', category: true },
   { label: '@dbObject:', hint: 'Adicionar um schema ou tabela do banco', insert: '@dbObject:', category: true },
+  { label: '@commit:', hint: 'Adicionar um commit', insert: '@commit:', category: true, available: () => !!sources.list },
+  { label: '@localChanges', hint: 'Alterações não commitadas', insert: '@localChanges', available: () => !!sources.list },
+  { label: '@problems', hint: 'Problemas do arquivo aberto', insert: '@problems', available: () => !!sources.problems?.() },
+  { label: '@projectStructure', hint: 'Estrutura da janela Projeto', insert: '@projectStructure', available: () => !!sources.list },
+  { label: '@rule:', hint: 'Adicionar uma regra do projeto', insert: '@rule:', category: true, available: () => !!sources.list },
  ];
  return async (query: string, signal: AbortSignal): Promise<Suggestion[]> => {
   const colon = query.indexOf(':');
@@ -65,6 +74,9 @@ export function mentionProvider(sources: Sources) {
    const head = categories.filter(c => (c.available?.() ?? true) && c.label.slice(1).toLowerCase().startsWith(q)).map(c => {
     const { available: _, ...item } = c;
     if (c.insert === '@thisFile' && context) item.mention = { kind: 'thisFile', label: base(context.path), path: context.path };
+    if (c.insert === '@localChanges') item.mention = { kind: 'localChanges', label: 'Alterações locais' };
+    if (c.insert === '@projectStructure') item.mention = { kind: 'projectStructure', label: 'Estrutura do projeto' };
+    if (c.insert === '@problems') { const p = sources.problems?.(); if (p) item.mention = { kind: 'problems', label: `Problemas: ${base(p.path)} (${p.count})`, path: p.path, text: p.text }; }
     if (c.insert === '@selection' && context?.selection) item.mention = { kind: 'selection', label: `${base(context.path)}${context.selectionRange ? `:${context.selectionRange.startLine}-${context.selectionRange.endLine}` : ''}`, path: context.path, text: context.selection, line: context.selectionRange?.startLine, endLine: context.selectionRange?.endLine };
     return item;
    });
@@ -92,6 +104,11 @@ export function mentionProvider(sources: Sources) {
    });
   }
   if (kind === 'dbObject') return schemaSuggestions(sources.database(), q);
+  if ((kind === 'commit' || kind === 'rule') && sources.list) {
+   const found = await sources.list(kind, q).catch(() => []); if (signal.aborted) return [];
+   if (kind === 'rule') return found.map((r: { name: string; path: string }) => ({ label: r.name, hint: r.path, icon: '§', insert: `@rule:${r.name}`, mention: { kind: 'rule' as const, label: r.name, path: r.path } }));
+   return found.map((c: { hash: string; short: string; subject: string; author: string; when: string }) => ({ label: `${c.short} ${c.subject}`, hint: `${c.author} · ${c.when}`, icon: '⎇', insert: `@commit:${c.short}`, mention: { kind: 'commit' as const, label: c.short, hash: c.hash, text: c.subject } }));
+  }
   return [];
  };
 }

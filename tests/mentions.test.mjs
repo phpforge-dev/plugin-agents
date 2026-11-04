@@ -5,10 +5,11 @@ import {activate} from '../workbench.js';
 
 const $ = sel => document.querySelector(sel);
 const database = {sqlIntelligence: {entries: new Map([['s1', {session: {id: 's1', label: 'app@localhost', driver: 'postgres'}, model: {schemas: [{name: 'public', tables: [{name: 'users', kind: 'table', columns: [{name: 'id', type: 'bigint'}, {name: 'email', type: 'text', nullable: false}]}]}]}}]])}};
-async function mount({context, services = {database}} = {}) {
+async function mount({context, services = {database}, markers} = {}) {
  const api = fakeApi();
  const opened = [];
- const s = makeSdk({services, host: {editor: {getSelection: () => ({startLineNumber: 7, startColumn: 5, endLineNumber: 9, endColumn: 6})}, open: async (path, line) => opened.push([path, line])}});
+ const s = makeSdk({services, host: {editor: {getModel: () => ({uri: {path: '/project/src/User.php'}}), getSelection: () => ({startLineNumber: 7, startColumn: 5, endLineNumber: 9, endColumn: 6})}, open: async (path, line) => opened.push([path, line])}});
+ if (markers) s.monaco.editor.getModelMarkers = () => markers.list;
  activate(s); s.api = api;
  const hooks = {context: () => context, reload: async () => {}, status: () => {}, language: () => 'php'};
  const panel = s.contribution.mount(api, $('#agent'), hooks);
@@ -30,7 +31,7 @@ test('@ lista categorias e arquivos recentes; @file: escolhe arquivo, insere tok
  assert.equal($('#agent-prompt').placeholder, 'Digite sua tarefa, use @ para adicionar arquivos ou / para comandos');
  await type('Explique @');
  assert.equal($('#agent-popup').hidden, false);
- assert.deepEqual(rows(), ['@thisFile', '@selection', '@file:', '@folder:', '@symbol:', '@dbObject:', 'User.php']);
+ assert.deepEqual(rows(), ['@thisFile', '@selection', '@file:', '@folder:', '@symbol:', '@dbObject:', '@commit:', '@localChanges', '@projectStructure', '@rule:', 'User.php']);
  assert.equal($('.agent-popup-footer').textContent, 'Pressione ↩ para inserir, ⇥ para substituir');
  await type('fi');
  assert.deepEqual(rows(), ['@file:']);
@@ -94,5 +95,42 @@ test('@symbol: busca símbolos, @folder: pastas, @dbObject: schema/tabelas; Tab 
  // Esc fecha o popup sem inserir.
  await type('@fi'); await key('Escape');
  assert.equal($('#agent-popup').hidden, true);
+ w.happyDOM.abort();
+});
+
+test('@commit:, @localChanges, @problems, @projectStructure e @rule: viram anexos resolvidos pelo host', async () => {
+ const w = dom();
+ const markers = {list: [{severity: 4, message: "Unused local variable 'unused'", startLineNumber: 9, startColumn: 9, source: 'php'}, {severity: 8, message: "Undefined variable '$missing'", startLineNumber: 10, startColumn: 20}]};
+ const {api, opened} = await mount({context: {path: 'src/User.php', text: '<?php'}, markers});
+ await type('@');
+ assert.deepEqual(rows().slice(5, 10), ['@commit:', '@localChanges', '@problems', '@projectStructure', '@rule:']);
+ await type('com'); await key('Enter');
+ assert.equal($('#agent-prompt').value, '@commit:');
+ assert.deepEqual(rows(), ['a1b2c3d Add User fixture', 'ffee000 Initial commit']);
+ assert.equal(document.querySelector('.agent-popup-hint').textContent, 'Fixture · 2 days ago');
+ await type('ffee'); assert.deepEqual(rows(), ['ffee000 Initial commit']);
+ await key('Enter');
+ assert.equal($('#agent-prompt').value, '@commit:ffee000 ');
+ await type('@local'); await key('Enter');
+ await type('@probl'); await key('Enter');
+ await type('@projectS'); await key('Enter');
+ await type('@rule:'); assert.deepEqual(rows(), ['php-style']); await key('Enter');
+ assert.equal($('#agent-prompt').value, '@commit:ffee000 @localChanges @problems @projectStructure @rule:php-style ');
+ assert.deepEqual([...document.querySelectorAll('#agent-chips .agent-chip-label')].map(c => c.textContent), ['ffee000', 'Alterações locais', 'Problemas: User.php (2)', 'Estrutura do projeto', 'php-style']);
+ assert.deepEqual([...document.querySelectorAll('.agent-highlight mark')].map(m => m.textContent), ['@commit:ffee000', '@localChanges', '@problems', '@projectStructure', '@rule:php-style']);
+ // A regra abre no editor; os problemas usam o estado do arquivo no envio.
+ document.querySelectorAll('#agent-chips .agent-chip-label')[4].click(); await tick();
+ assert.deepEqual(opened, [['.aiassistant/rules/php-style.md', undefined]]);
+ markers.list = markers.list.slice(1);
+ $('#agent-send').click(); await tick(8);
+ const extras = api.calls.find(c => c[0] === 'agentPrompt')[3];
+ assert.deepEqual(extras.attachments, [
+  {type: 'commit', hash: 'ffee000011112222333344445555666677778888'},
+  {type: 'localChanges'},
+  {type: 'problems', path: 'src/User.php', text: "ERRO src/User.php:10:20 Undefined variable '$missing'"},
+  {type: 'projectStructure'},
+  {type: 'rule', path: '.aiassistant/rules/php-style.md'},
+ ]);
+ assert.deepEqual([...document.querySelectorAll('.agent-user .agent-chip')].map(c => c.dataset.kind), ['commit', 'localChanges', 'problems', 'projectStructure', 'rule']);
  w.happyDOM.abort();
 });

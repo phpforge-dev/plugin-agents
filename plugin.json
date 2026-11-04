@@ -26,6 +26,7 @@
       "agentHistoryRename",
       "agentHistorySave",
       "agentKeep",
+      "agentMentions",
       "agentMode",
       "agentPermission",
       "agentPrompt",

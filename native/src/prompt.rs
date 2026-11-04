@@ -166,6 +166,46 @@ pub fn blocks(root: &Path, attachments: &[Value], caps: Capabilities) -> Res<(Ve
                 out.extend(resource(caps, format!("php-ide://database/{}", label.replace(' ', "%20")), &name, "text/x-sql", text));
                 plain.push_str(&format!("\n<database-schema name=\"{}\">\n{}\n</database-schema>", label, text));
             }
+            // Contexto já resolvido (commit, alterações locais, estrutura e regra vêm de `context::resolve`;
+            // problemas vêm dos marcadores do editor; arquivo arrastado do sistema traz o próprio conteúdo).
+            "commit" | "localChanges" | "projectStructure" | "rule" | "problems" | "dropped" => {
+                let text = s(a, "text")?;
+                add_text(text)?;
+                let (uri, name, tag) = match kind {
+                    "commit" => {
+                        let hash = s(a, "hash")?;
+                        if !(4..=40).contains(&hash.len()) || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                            return Err("Hash de commit inválido".into());
+                        }
+                        (format!("php-ide://git/commit/{}", hash), format!("Commit {}", &hash[..hash.len().min(10)]), "commit")
+                    }
+                    "localChanges" => ("php-ide://git/local-changes".to_string(), "Alterações locais não commitadas".to_string(), "local-changes"),
+                    "projectStructure" => ("php-ide://project/structure".to_string(), "Estrutura do projeto".to_string(), "project-structure"),
+                    "rule" => {
+                        let path = s(a, "path")?;
+                        (uri(root, path)?, format!("Regra do projeto {}", path), "project-rule")
+                    }
+                    "problems" => {
+                        let path = s(a, "path")?;
+                        (format!("php-ide://problems/{}", path), format!("Problemas em {}", path), "problems")
+                    }
+                    _ => {
+                        let name = s(a, "name")?;
+                        if name.contains(['/', '\\']) || name.len() > 255 {
+                            return Err("Nome de arquivo anexado inválido".into());
+                        }
+                        (format!("php-ide://attachment/{}", url::form_urlencoded::byte_serialize(name.as_bytes()).collect::<String>()), format!("Arquivo anexado {}", name), "attachment")
+                    }
+                };
+                let mime = match kind {
+                    "commit" | "localChanges" => "text/x-diff",
+                    "rule" => "text/markdown",
+                    "dropped" => mime(s(a, "name")?),
+                    _ => "text/plain",
+                };
+                out.extend(resource(caps, uri, &name, mime, text));
+                plain.push_str(&format!("\n<{} name=\"{}\">\n{}\n</{}>", tag, name, text, tag));
+            }
             "image" => {
                 if !caps.image {
                     return Err("Este agente não aceita imagens (promptCapabilities.image)".into());
@@ -230,6 +270,36 @@ mod tests {
         assert_eq!(blocks[6]["resource"]["uri"], "php-ide://database/public.users");
         assert_eq!(blocks[7], json!({"type":"image","mimeType":"image/png","data":"iVBORw0KGgo="}));
         assert!(plain.contains("<database-schema name=\"public.users\">"));
+    }
+    #[test]
+    fn resolved_context_problems_and_dropped_files_become_resources() {
+        let (_d, root) = project();
+        std::fs::create_dir_all(root.join(".aiassistant/rules")).unwrap();
+        std::fs::write(root.join(".aiassistant/rules/style.md"), "x").unwrap();
+        let (b, plain) = blocks(
+            &root,
+            &[
+                json!({"type":"commit","hash":"0123456789abcdef","text":"commit 0123\n+x"}),
+                json!({"type":"localChanges","text":"diff --git"}),
+                json!({"type":"projectStructure","text":"proj/"}),
+                json!({"type":"rule","path":".aiassistant/rules/style.md","text":"Use strict_types."}),
+                json!({"type":"problems","path":"src/User.php","text":"ERRO src/User.php:10 Undefined variable"}),
+                json!({"type":"dropped","name":"notas de uso.md","text":"# Notas"}),
+            ],
+            EMB,
+        )
+        .unwrap();
+        assert_eq!(b[0]["resource"]["uri"], "php-ide://git/commit/0123456789abcdef");
+        assert_eq!(b[0]["resource"]["mimeType"], "text/x-diff");
+        assert_eq!(b[1]["resource"]["uri"], "php-ide://git/local-changes");
+        assert_eq!(b[2]["resource"]["text"], "proj/");
+        assert!(b[3]["resource"]["uri"].as_str().unwrap().ends_with("/.aiassistant/rules/style.md"));
+        assert_eq!(b[4]["resource"]["uri"], "php-ide://problems/src/User.php");
+        assert_eq!(b[5]["resource"]["uri"], "php-ide://attachment/notas+de+uso.md");
+        assert_eq!(b[5]["resource"]["mimeType"], "text/markdown");
+        assert!(plain.contains("<local-changes name=\"Alterações locais não commitadas\">"));
+        assert!(blocks(&root, &[json!({"type":"dropped","name":"../x","text":"a"})], EMB).is_err());
+        assert!(blocks(&root, &[json!({"type":"commit","hash":"abc"})], EMB).is_err(), "sem texto resolvido");
     }
     #[test]
     fn without_embedded_context_text_goes_as_link_plus_text() {

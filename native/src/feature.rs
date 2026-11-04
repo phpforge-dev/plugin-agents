@@ -2,6 +2,7 @@ fn s(v: &serde_json::Value) -> Result<&str, String> {
     v.as_str().ok_or_else(|| "Campo de texto inválido".into())
 }
 use crate::{
+    context,
     history::History,
     prompt::{self, Capabilities},
     terminal::{self, Terminals},
@@ -415,6 +416,11 @@ impl Agents {
             return Ok(Value::Null);
         }
         match method {
+            // Sugestões de `@commit:` e `@rule:` (sem sessão de agente).
+            "agentMentions" => {
+                let (root, kind, query) = (self.data.root.clone(), s(a(0))?.to_string(), a(1).as_str().unwrap_or("").to_string());
+                return tokio::task::spawn_blocking(move || context::list(&root, &kind, &query)).await.map_err(err)?;
+            }
             "agentHistory" => return Ok(self.history.list()),
             "agentHistoryLoad" => return self.history.load(s(a(0))?),
             "agentHistorySave" => return self.history.save(a(0)),
@@ -548,7 +554,9 @@ impl Agents {
                 }
                 // Menções @ e anexos: arquivos/pastas lidos aqui, confinados ao projeto.
                 if let Some(attachments) = a(2)["attachments"].as_array() {
-                    let (extra, plain) = prompt::blocks(&self.data.root, attachments, session.caps)?;
+                    let (root, list) = (self.data.root.clone(), attachments.clone());
+                    let attachments = tokio::task::spawn_blocking(move || context::resolve(&root, &list)).await.map_err(err)??;
+                    let (extra, plain) = prompt::blocks(&self.data.root, &attachments, session.caps)?;
                     blocks.extend(extra);
                     codex.push_str(&plain);
                 }

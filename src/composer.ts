@@ -3,7 +3,7 @@
  * realce dos tokens inseridos e fichas de contexto abaixo do texto, como o AI Chat do PhpStorm.
  * ↩ insere a sugestão, ⇥ substitui o token sob o cursor, Esc fecha; ↑/↓ navegam.
  */
-export type Mention = { kind: 'thisFile' | 'selection' | 'file' | 'folder' | 'symbol' | 'schema' | 'image'; label: string; path?: string; line?: number; endLine?: number; text?: string; mimeType?: string; data?: string; size?: number };
+export type Mention = { kind: 'thisFile' | 'selection' | 'file' | 'folder' | 'symbol' | 'schema' | 'image' | 'commit' | 'localChanges' | 'problems' | 'projectStructure' | 'rule' | 'dropped'; label: string; path?: string; hash?: string; line?: number; endLine?: number; text?: string; mimeType?: string; data?: string; size?: number };
 export type Suggestion = {
  label: string; hint?: string; icon?: string;
  /** Texto que substitui o token (sem espaço final). */

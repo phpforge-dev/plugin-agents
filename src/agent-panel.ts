@@ -28,6 +28,12 @@ function payload(m: Mention, context: ReturnType<Hooks['context']>): Record<stri
   case 'symbol': return { type: 'symbol', name: m.label, path: m.path, line: m.line, endLine: m.endLine };
   case 'schema': return { type: 'schema', label: m.label, text: m.text };
   case 'image': return { type: 'image', name: m.label, mimeType: m.mimeType, data: m.data };
+  case 'commit': return { type: 'commit', hash: m.hash };
+  case 'localChanges': return { type: 'localChanges' };
+  case 'projectStructure': return { type: 'projectStructure' };
+  case 'rule': return { type: 'rule', path: m.path };
+  case 'problems': return { type: 'problems', path: m.path, text: m.text };
+  case 'dropped': return { type: 'dropped', name: m.label, text: m.text };
  }
 }
 
@@ -72,6 +78,8 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   recent: () => { remember(hooks.context()?.path); return recent; },
   database: () => databaseEntries(),
   root: () => projectRoot,
+  list: api.agentMentions ? (kind: string, query: string) => api.agentMentions(kind, query) : undefined,
+  problems: () => problems(),
  });
  const input = composer($<HTMLTextAreaElement>('agent-prompt'), $('agent-chips'), {
   // Comandos "/" vêm do agente (ACP available_commands_update), como no modo agente do AI Chat.
@@ -119,12 +127,22 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   const hint = commands.find(c => c.name === name)?.hint;
   $('agent-command-hint').hidden = !hint; $('agent-command-hint').textContent = hint ? `/${name} ${hint}` : '';
  }
+ /** @problems: marcadores do arquivo aberto (os mesmos da janela Problemas e da faixa do editor). */
+ function problems() {
+  const model = host?.editor?.getModel?.(); const path = hooks.context()?.path;
+  if (!model || !path || !monaco?.editor?.getModelMarkers) return undefined;
+  const severity: Record<number, string> = { 8: 'ERRO', 4: 'AVISO', 2: 'INFO', 1: 'DICA' };
+  const markers = (monaco.editor.getModelMarkers({ resource: model.uri }) as { severity: number; message: string; startLineNumber: number; startColumn: number; source?: string }[])
+   .filter(m => m.severity >= 2).sort((a, b) => b.severity - a.severity || a.startLineNumber - b.startLineNumber).slice(0, 200);
+  const text = markers.length ? markers.map(m => `${severity[m.severity] ?? 'INFO'} ${path}:${m.startLineNumber}:${m.startColumn} ${m.message}${m.source ? ` [${m.source}]` : ''}`).join('\n') : `Nenhum problema detectado em ${path}.`;
+  return { path, text, count: markers.length };
+ }
  let projectRoot = '';
  void api.workspace?.().then((w: { root: string }) => { projectRoot = w.root; }).catch(() => {});
  $('agent-chips').addEventListener('agent-open-attachment', event => {
   const m = (event as CustomEvent<Mention>).detail;
   if (m.kind === 'image' && m.data) { previewImage(m); return; }
-  if (m.path && m.kind !== 'folder' && m.kind !== 'schema') void host?.open?.(m.path, m.line ? m.line - 1 : undefined);
+  if (m.path && !['folder', 'schema', 'problems', 'dropped'].includes(m.kind)) void host?.open?.(m.path, m.line ? m.line - 1 : undefined);
  });
  function previewImage(m: Mention) {
   const dialog = document.createElement('dialog'); dialog.className = 'agent-image-preview';
@@ -241,7 +259,8 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   if (!text || running || !started) return;
   const context = $<HTMLInputElement>('agent-context').checked ? hooks.context() : undefined;
   const extras: Extras = {};
-  const mentioned = input.mentions();
+  // @problems vale para o estado do arquivo no envio, não no momento em que foi digitado.
+  const mentioned = input.mentions().map(m => { if (m.kind !== 'problems') return m; const p = problems(); return p && p.path === m.path ? { ...m, text: p.text } : m; });
   const live = hooks.context();
   if (mentioned.length) extras.attachments = mentioned.map(m => payload(m, live)).filter(Boolean) as Record<string, unknown>[];
   for (const m of mentioned) if (m.kind === 'file' || m.kind === 'thisFile') remember(m.path);

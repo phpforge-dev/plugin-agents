@@ -1,5 +1,5 @@
 /** Itens serializáveis da transcrição: o histórico grava e restaura exatamente esta lista. */
-export type Attachment = { kind: 'file' | 'folder' | 'selection' | 'symbol' | 'schema' | 'image' | 'thisFile'; label: string; path?: string };
+export type Attachment = { kind: 'file' | 'folder' | 'selection' | 'symbol' | 'schema' | 'image' | 'thisFile' | 'commit' | 'localChanges' | 'problems' | 'projectStructure' | 'rule' | 'dropped'; label: string; path?: string };
 export type Item =
  | { kind: 'user'; text: string; attachments?: Attachment[] }
  | { kind: 'message'; text: string }

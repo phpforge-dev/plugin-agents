@@ -1,3 +1,4 @@
+mod context;
 mod feature;
 mod history;
 mod prompt;
