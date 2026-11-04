@@ -1,4 +1,5 @@
 mod feature;
+mod history;
 #[allow(dead_code)]
 mod rpc;
 #[allow(dead_code)]

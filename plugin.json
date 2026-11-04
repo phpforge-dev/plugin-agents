@@ -20,6 +20,11 @@
     "services": [
       "agentCancel",
       "agentDiscard",
+      "agentHistory",
+      "agentHistoryDelete",
+      "agentHistoryLoad",
+      "agentHistoryRename",
+      "agentHistorySave",
       "agentKeep",
       "agentMode",
       "agentPermission",

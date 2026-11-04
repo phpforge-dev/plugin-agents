@@ -61,3 +61,27 @@
 .agent-permission{border-color:var(--warning)}
 .agent-welcome h2{color:var(--text)}
 .agent-examples button{background:var(--raised);border-color:var(--border);color:var(--text)}
+/* AI-ACP-001: cabeçalho, histórico de conversas e menus (Chat History). */
+#agent{display:flex;flex-direction:column;gap:8px;min-height:0}
+.agent-chat{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
+.agent-chat[hidden],#agent-history[hidden]{display:none}
+.agent-toolbar{display:flex;gap:2px;margin-left:auto;align-items:center}
+.agent-toolbar button{background:transparent;border:0;color:var(--text);padding:5px 7px;border-radius:5px;cursor:pointer}
+.agent-toolbar button:hover,.agent-toolbar button[aria-pressed=true]{background:var(--raised)}
+.agent-icon{font-size:14px;line-height:1;min-width:26px}
+#agent-history{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px}
+.agent-history-search{width:100%;box-sizing:border-box;padding:5px 8px;border-radius:5px}
+.agent-history-list{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+.agent-history-list li{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;font-size:12px}
+.agent-history-list li:hover,.agent-history-list li:focus{background:var(--selection);outline:0}
+.agent-history-list li[aria-current=true] .agent-history-title{font-weight:600}
+.agent-history-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.agent-history-time{color:var(--muted);font-size:11px;white-space:nowrap}
+.agent-history-waiting{width:7px;height:7px;border-radius:50%;background:var(--warning);flex:none}
+.agent-history-empty{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
+.agent-history-rename{flex:1;font-size:12px;padding:2px 4px}
+.agent-menu{position:fixed;z-index:1000;min-width:180px;background:var(--raised);border:1px solid var(--border);border-radius:7px;padding:4px;box-shadow:0 6px 20px rgba(0,0,0,.35);display:flex;flex-direction:column}
+.agent-menu button{display:flex;gap:16px;justify-content:space-between;align-items:center;background:transparent;border:0;color:var(--text);text-align:left;padding:5px 10px;border-radius:4px;font-size:12px;cursor:pointer}
+.agent-menu button:hover,.agent-menu button:focus{background:var(--selection);outline:0}
+.agent-menu kbd{color:var(--muted);font-family:inherit;font-size:11px}
+.agent-user-text{white-space:pre-wrap}

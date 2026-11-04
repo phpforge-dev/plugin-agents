@@ -2,6 +2,7 @@ fn s(v: &serde_json::Value) -> Result<&str, String> {
     v.as_str().ok_or_else(|| "Campo de texto inválido".into())
 }
 use crate::{
+    history::History,
     rpc::{Handler, Rpc},
     workspace::{self, err, Res},
 };
@@ -14,7 +15,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 fn emit(app: &AppHandle, event: Value) {
     let _ = app.emit("event", json!({"type":"acp","event":event}));
@@ -60,6 +61,7 @@ struct Session {
 pub struct Agents {
     state: tokio::sync::Mutex<Option<Session>>,
     data: Arc<Data>,
+    history: History,
 }
 impl Data {
     fn relative(&self, path: &str) -> Res<String> {
@@ -193,7 +195,13 @@ impl Data {
 }
 impl Agents {
     pub fn new(root: PathBuf, app: AppHandle) -> Self {
+        // Mesmo diretório de estado da IDE (PHP_IDE_STATE_DIR nos testes); nunca dentro do projeto.
+        let state = std::env::var_os("PHP_IDE_STATE_DIR")
+            .map(PathBuf::from)
+            .or_else(|| app.path().app_config_dir().ok())
+            .unwrap_or_else(std::env::temp_dir);
         Self {
+            history: History::new(&state, &root),
             state: tokio::sync::Mutex::new(None),
             data: Arc::new(Data {
                 root,
@@ -352,6 +360,14 @@ impl Agents {
             }
             return Ok(Value::Null);
         }
+        match method {
+            "agentHistory" => return Ok(self.history.list()),
+            "agentHistoryLoad" => return self.history.load(s(a(0))?),
+            "agentHistorySave" => return self.history.save(a(0)),
+            "agentHistoryRename" => return self.history.rename(s(a(0))?, s(a(1))?),
+            "agentHistoryDelete" => return self.history.delete(a(0).as_str()),
+            _ => {}
+        }
         if method == "agentPermission" {
             let tx = self
                 .data
@@ -467,6 +483,15 @@ impl Agents {
                         );
                     }
                     codex.push_str(&format!("\n<editor-buffer>\n{}\n</editor-buffer>", content));
+                }
+                // Conversa restaurada do histórico: a sessão nova recebe a conversa anterior antes do pedido.
+                if let Some(previous) = a(2)["history"].as_str().filter(|t| !t.trim().is_empty()) {
+                    if previous.len() > 65536 {
+                        return Err("Histórico restaurado excede 64 KB".into());
+                    }
+                    let note = format!("Conversa anterior restaurada do histórico do PHP IDE (somente contexto):\n{}", previous);
+                    blocks.insert(0, json!({"type":"text","text":note}));
+                    codex = format!("{}\n\n{}", note, codex);
                 }
                 if self.data.running.swap(true, Ordering::AcqRel) {
                     return Err("Aguarde ou interrompa o turno".into());
