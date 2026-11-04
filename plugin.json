@@ -10,6 +10,7 @@
   },
   "permissions": [
     "project.read",
+    "project.write",
     "workbench",
     "process"
   ],
@@ -31,12 +32,14 @@
       "agentPermission",
       "agentPrompt",
       "agentReset",
+      "agentRunSnippet",
       "agentStart",
       "agentTerminalDecision",
       "agentTerminalKill",
       "agentTerminalPolicy",
       "agentTerminalPolicySet",
       "agents",
+      "fileCreate",
       "listFiles",
       "read",
       "searchSymbols",

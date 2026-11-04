@@ -59,7 +59,7 @@ test('Aplicar abre a prévia (Atual · Proposto); Aceitar tudo edita o buffer co
  document.querySelector('#agent-prompt').value = 'melhore'; document.querySelector('#agent-send').click(); await tick(10);
  const block = document.querySelector('.agent-code');
  assert.equal(block.querySelector('.agent-code-lang').textContent, 'src/User.php');
- assert.deepEqual([...block.querySelectorAll('.agent-code-head button')].map(b => b.textContent), ['Aplicar', 'Inserir no cursor', 'Copiar']);
+ assert.deepEqual([...block.querySelectorAll('.agent-code-head button')].map(b => b.textContent), ['Aplicar', 'Inserir no cursor', 'Copiar', 'Criar arquivo', 'Executar']);
  // Descartar.
  block.querySelector('.agent-code-apply').click(); await tick(4);
  let dialog = document.querySelector('dialog.agent-apply');

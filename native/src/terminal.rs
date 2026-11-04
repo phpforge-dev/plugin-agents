@@ -15,7 +15,7 @@ use tokio::{
     sync::{oneshot, watch},
 };
 
-const DEFAULT_LIMIT: usize = 1024 * 1024;
+pub const DEFAULT_LIMIT: usize = 1024 * 1024;
 
 #[derive(Default)]
 struct Output {
@@ -66,6 +66,27 @@ pub struct Request {
     pub env: Vec<(String, String)>,
     pub cwd: PathBuf,
     pub limit: usize,
+}
+/// "Executar trecho" (Run Snippet): o bloco de código vira um comando conforme a linguagem.
+/// Shell roda com `sh -c` (prompts `$ ` do início das linhas são removidos); PHP roda com `php -r`.
+pub fn snippet(root: &Path, lang: &str, code: &str) -> Res<Request> {
+    if code.trim().is_empty() || code.len() > 65536 {
+        return Err("Trecho vazio ou maior que 64 KB".into());
+    }
+    let (command, args) = match lang.to_lowercase().as_str() {
+        "bash" | "sh" | "shell" | "zsh" | "console" | "terminal" | "shellscript" | "shell-session" => {
+            let text = code.lines().map(|l| l.strip_prefix("$ ").unwrap_or(l)).collect::<Vec<_>>().join("\n");
+            (text.trim().to_string(), vec![])
+        }
+        "php" => {
+            let body = code.trim();
+            let body = body.strip_prefix("<?php").unwrap_or(body);
+            let body = body.trim_end().strip_suffix("?>").unwrap_or(body).trim();
+            ("php".to_string(), vec!["-r".to_string(), body.to_string()])
+        }
+        _ => return Err("Este trecho não pode ser executado (use shell ou PHP)".into()),
+    };
+    Ok(Request { command, args, env: vec![], cwd: root.to_path_buf(), limit: DEFAULT_LIMIT })
 }
 impl Request {
     /// Valida o pedido ACP: diretório dentro do projeto, variáveis e limite de saída.
@@ -266,6 +287,23 @@ mod tests {
         assert!(Request::parse(&r, &json!({"command":"ls","cwd":"/"})).is_err());
         assert!(Request::parse(&r, &json!({"command":"  "})).is_err());
         assert_eq!(Request::parse(&r, &json!({"command":"ls"})).unwrap().cwd, r);
+    }
+    #[tokio::test]
+    async fn snippets_run_as_shell_or_php_in_the_project_root() {
+        let (_d, r) = root();
+        let req = snippet(&r, "console", "$ echo um\n$ pwd").unwrap();
+        assert_eq!(display(&req.command, &req.args), "echo um\npwd");
+        assert_eq!(req.cwd, r);
+        let t = Terminals::default();
+        t.spawn("s", req, Arc::new(|_| {}), Arc::new(|_| {})).unwrap();
+        assert_eq!(t.wait("s").await.unwrap()["exitCode"], 0);
+        let out = t.output("s").unwrap();
+        assert_eq!(out["output"].as_str().unwrap(), format!("um\n{}\n", r.display()));
+        let php = snippet(&r, "php", "<?php\necho 'oi';\n?>").unwrap();
+        assert_eq!((php.command.as_str(), php.args.clone()), ("php", vec!["-r".to_string(), "echo 'oi';".to_string()]));
+        assert_eq!(display(&php.command, &php.args), "php -r 'echo '\\''oi'\\'';'");
+        assert!(snippet(&r, "json", "{}").is_err());
+        assert!(snippet(&r, "bash", "  ").is_err());
     }
     #[tokio::test]
     async fn runs_only_after_approval_and_reports_output_and_exit() {

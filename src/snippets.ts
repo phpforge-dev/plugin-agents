@@ -7,7 +7,25 @@ type Ctx = {
  language(path: string): string | undefined;
  status(text: string): void;
  own(fn: () => void): void;
+ /** Operações do host: criar arquivo (project.write) e executar trecho (terminal do agente). */
+ api?: { fileCreate?(path: string, kind: string, text: string): Promise<string>; agentRunSnippet?(code: string, lang: string): Promise<string> };
 };
+
+const SHELL = ['bash', 'sh', 'shell', 'zsh', 'console', 'terminal', 'shellscript', 'shell-session'];
+const EXT: Record<string, string> = { php: 'php', js: 'js', javascript: 'js', ts: 'ts', typescript: 'ts', json: 'json', yaml: 'yaml', yml: 'yml', xml: 'xml', html: 'html', twig: 'twig', css: 'css', scss: 'scss', sql: 'sql', md: 'md', markdown: 'md', bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh', vue: 'vue', ini: 'ini', dotenv: 'env', neon: 'neon', blade: 'blade.php' };
+/** Comando que o host executa para o trecho (mesma regra de native/src/terminal.rs). */
+export function snippetCommand(fence: { lang: string; code: string }): string | undefined {
+ const lang = fence.lang.toLowerCase();
+ if (SHELL.includes(lang)) return fence.code.split('\n').map(l => l.startsWith('$ ') ? l.slice(2) : l).join('\n').trim();
+ if (lang === 'php') { let body = fence.code.trim(); if (body.startsWith('<?php')) body = body.slice(5); body = body.trimEnd(); if (body.endsWith('?>')) body = body.slice(0, -2); body = body.trim(); return `php -r ${/^[\w\-./=:@%+,]+$/.test(body) ? body : `'${body.replace(/'/g, `'\\''`)}'`}`; }
+}
+/** Nome sugerido: caminho indicado pelo agente, senão a classe declarada, senão snippet.<ext>. */
+export function suggestedPath(fence: Fence) {
+ const path = targetPath(fence); if (path) return path;
+ const type = fence.code.match(/^\s*(?:final\s+|abstract\s+|readonly\s+)*(?:class|interface|trait|enum)\s+([A-Za-z_]\w*)/m)?.[1];
+ const ext = EXT[fence.lang.toLowerCase()] ?? 'txt';
+ return type && ext === 'php' ? `${type}.php` : `snippet.${ext}`;
+}
 
 const short = (path: string) => path.split('/').pop() ?? path;
 
@@ -26,6 +44,8 @@ export function renderMessage(el: HTMLElement, text: string, ctx: Ctx) {
    action('Aplicar', path ? `Aplicar em ${path} com prévia` : 'Aplicar no arquivo atual com prévia', () => apply(part, ctx)).classList.add('agent-code-apply');
    action('Inserir no cursor', 'Inserir o trecho no cursor do editor', () => insert(part, ctx)).classList.add('agent-code-insert');
    action('Copiar', 'Copiar para a área de transferência', async () => { await navigator.clipboard.writeText(part.code); ctx.status('Trecho copiado.'); }).classList.add('agent-code-copy');
+   if (ctx.api?.fileCreate) action('Criar arquivo', 'Criar um arquivo do projeto com este trecho', () => createFile(part, ctx)).classList.add('agent-code-create');
+   if (ctx.api?.agentRunSnippet && snippetCommand(part)) action('Executar', 'Executar este trecho no terminal (pede confirmação)', () => runSnippet(part, ctx)).classList.add('agent-code-run');
   }
   const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = part.code; pre.append(code);
   block.append(head, pre); el.append(block);
@@ -107,4 +127,57 @@ function preview(path: string, original: string, proposed: string, mode: keyof t
  });
  setTimeout(() => { if (!closed) go('next'); }, 80);
  accept.focus();
+}
+
+function modal(cls: string, label: string) {
+ const dialog = document.createElement('dialog'); dialog.className = `agent-snippet-dialog ${cls}`; dialog.setAttribute('aria-label', label);
+ const head = document.createElement('div'); head.className = 'agent-snippet-head'; const title = document.createElement('strong'); title.textContent = label; head.append(title);
+ const footer = document.createElement('div'); footer.className = 'agent-snippet-actions';
+ const error = document.createElement('p'); error.className = 'agent-snippet-error'; error.hidden = true; error.setAttribute('role', 'alert');
+ dialog.append(head); document.body.append(dialog);
+ const button = (text: string, cls: string) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.className = cls; footer.append(b); return b; };
+ const close = () => { if (dialog.open) dialog.close(); dialog.remove(); };
+ return { dialog, footer, error, button, close, show(...body: HTMLElement[]) { dialog.append(...body, error, footer); dialog.showModal(); } };
+}
+const textPreview = (text: string) => { const pre = document.createElement('pre'); pre.className = 'agent-snippet-preview'; const lines = text.split('\n'); pre.textContent = lines.length > 400 ? lines.slice(0, 400).join('\n') + `\n… ${lines.length - 400} linhas` : text; return pre; };
+
+/** Create File from Snippet: confirma o caminho (editável) e cria pelo host; nunca sobrescreve. */
+export function createFile(fence: Fence, ctx: Ctx) {
+ const m = modal('agent-create-file', 'Criar arquivo a partir do trecho');
+ const field = document.createElement('label'); field.className = 'agent-snippet-field'; field.textContent = 'Caminho no projeto';
+ const input = document.createElement('input'); input.type = 'text'; input.value = suggestedPath(fence); input.spellcheck = false; field.append(input);
+ const cancel = m.button('Cancelar', 'agent-create-cancel'); const create = m.button('Criar', 'primary agent-create-confirm');
+ m.show(field, textPreview(fence.code)); ctx.own(m.close);
+ const name = input.value.lastIndexOf('/') + 1; input.focus(); input.setSelectionRange(name, input.value.replace(/\.[^./]+$/, '').length);
+ const valid = () => { const p = input.value.trim(); return !!p && !p.startsWith('/') && !p.split('/').some(s => s === '..' || s === '') && !p.endsWith('/'); };
+ input.oninput = () => { m.error.hidden = true; create.disabled = !valid(); };
+ cancel.onclick = m.close;
+ create.onclick = async () => {
+  if (!valid()) return;
+  create.disabled = true; m.error.hidden = true;
+  try {
+   const path = await ctx.api!.fileCreate!(input.value.trim(), 'file', fence.code);
+   m.close(); await ctx.host?.open?.(path || input.value.trim()); ctx.status(`Arquivo criado: ${path || input.value.trim()}`);
+  } catch (error) { m.error.textContent = String((error as Error).message ?? error); m.error.hidden = false; create.disabled = false; input.focus(); }
+ };
+ input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); create.click(); } };
+ m.dialog.addEventListener('cancel', event => { event.preventDefault(); m.close(); });
+}
+
+/** Run Snippet: mostra o comando exato e a pasta; só executa depois de Executar. */
+export function runSnippet(fence: Fence, ctx: Ctx) {
+ const command = snippetCommand(fence)!;
+ const m = modal('agent-run-snippet', 'Executar trecho no terminal?');
+ const cmd = document.createElement('pre'); cmd.className = 'agent-terminal-command'; cmd.textContent = `$ ${command}`;
+ const where = document.createElement('div'); where.className = 'agent-terminal-cwd'; where.textContent = 'na raiz do projeto · a saída aparece na conversa';
+ const cancel = m.button('Cancelar', 'agent-run-cancel'); const run = m.button('Executar', 'primary agent-run-confirm');
+ m.show(cmd, where); ctx.own(m.close);
+ cancel.focus();
+ cancel.onclick = () => { m.close(); ctx.status('Execução cancelada.'); };
+ run.onclick = async () => {
+  run.disabled = cancel.disabled = true;
+  try { await ctx.api!.agentRunSnippet!(fence.code, fence.lang); m.close(); }
+  catch (error) { m.error.textContent = String((error as Error).message ?? error); m.error.hidden = false; cancel.disabled = false; }
+ };
+ m.dialog.addEventListener('cancel', event => { event.preventDefault(); cancel.click(); });
 }

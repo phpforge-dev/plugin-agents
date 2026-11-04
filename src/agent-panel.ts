@@ -54,7 +54,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
  const liveTerminals = new Set<string>();
- const snippetContext = { monaco, host, language: (path: string) => hooks.language(path), status: (text: string) => hooks.status(text), own };
+ const snippetContext = { monaco, host, language: (path: string) => hooks.language(path), status: (text: string) => hooks.status(text), own, api: { fileCreate: api.fileCreate ? (path: string, kind: string, text: string) => api.fileCreate(path, kind, text) : undefined, agentRunSnippet: api.agentRunSnippet ? (code: string, lang: string) => api.agentRunSnippet(code, lang) : undefined } };
  const transcript = new Transcript($('agent-transcript'), { terminal: (el, item) => renderTerminal(el, item), message: (el, text) => renderMessage(el, text, snippetContext) });
  const welcome = root.querySelector<HTMLElement>('.agent-welcome')!;
  // Buscar na conversa (Find in Chat): ⌘F/Ctrl+F dentro do chat ou ⋮ › Buscar na conversa.
@@ -189,7 +189,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
    : item.status === 'rejected' ? 'Recusado' : item.status === 'killed' ? `Interrompido${item.signal ? ` (${item.signal})` : ''}` : item.exitCode === 0 ? 'Concluído' : `Falhou · código ${item.exitCode ?? '?'}`;
   el.dataset.state = item.status === 'exited' ? (item.exitCode === 0 ? 'ok' : 'failed') : item.status;
   const head = document.createElement('div'); head.className = 'agent-terminal-head';
-  const title = document.createElement('strong'); title.textContent = item.status === 'waiting' && live ? 'Executar comando no terminal?' : 'Terminal';
+  const title = document.createElement('strong'); title.textContent = item.status === 'waiting' && live ? 'Executar comando no terminal?' : item.origin === 'snippet' ? 'Trecho executado' : 'Terminal';
   const state = document.createElement('span'); state.className = 'agent-terminal-status'; state.textContent = status;
   head.append(title, state);
   const command = document.createElement('pre'); command.className = 'agent-terminal-command'; command.textContent = `$ ${item.command}`;
@@ -417,6 +417,8 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
     if (e.command !== undefined && !transcript.items.some(i => i.kind === 'terminal' && i.id === e.id)) { liveTerminals.add(e.id); transcript.endStream(); transcript.add({ kind: 'terminal', id: e.id, command: e.command, cwd: e.cwd ?? '', status: e.status, output: '', ...(e.auto ? { auto: e.auto } : {}), ...(e.similar ? { similar: e.similar } : {}), ...(e.origin ? { origin: e.origin } : {}) }); }
     else transcript.terminal(e.id, { status: e.status, ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}), ...(e.signal !== undefined ? { signal: e.signal } : {}) });
     waiting = pendingApprovals(); history.refresh();
+    // Trecho executado fora de um turno: grava o resultado no histórico ao terminar.
+    if (!running && (e.status === 'exited' || e.status === 'killed') && transcript.items.some(i => i.kind === 'terminal' && i.id === e.id && i.origin === 'snippet')) { conversation.id ??= newId(); void save(); }
     if (e.status === 'waiting') transcript.element(transcript.items[transcript.items.length - 1])?.scrollIntoView?.({ block: 'nearest' });
     break;
    }

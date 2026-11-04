@@ -175,3 +175,13 @@ dialog.agent-allowlist header{display:flex;align-items:center;justify-content:sp
 .agent-allowlist-rules li{display:flex;align-items:center;gap:8px;font-size:12px}
 .agent-allowlist-rules code{flex:1;font-family:var(--mono,monospace);overflow-wrap:anywhere}
 .agent-allowlist-kind{color:var(--muted);font-size:11px}
+
+dialog.agent-snippet-dialog{background:var(--raised);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;width:min(620px,90vw);display:flex;flex-direction:column;gap:8px}
+dialog.agent-snippet-dialog:not([open]){display:none}
+dialog.agent-snippet-dialog .agent-snippet-head{font-size:13px}
+dialog.agent-snippet-dialog .agent-snippet-actions{display:flex;justify-content:flex-end;gap:6px}
+dialog.agent-snippet-dialog .agent-snippet-actions .primary{background:var(--ij-button-default);border-color:var(--ij-button-default);color:var(--ij-button-default-text)}
+.agent-snippet-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.agent-snippet-field input{font-family:var(--mono,monospace);font-size:12px;padding:4px 6px;background:var(--bg,transparent);color:var(--text);border:1px solid var(--border);border-radius:4px}
+.agent-snippet-preview{margin:0;max-height:40vh;overflow:auto;font-family:var(--mono,monospace);font-size:11.5px;background:var(--bg,rgba(0,0,0,.15));padding:6px 8px;border-radius:4px}
+.agent-snippet-error{margin:0;color:var(--danger);font-size:12px}

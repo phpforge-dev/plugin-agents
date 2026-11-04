@@ -457,6 +457,21 @@ impl Agents {
             self.data.terminals.decide(s(a(0))?, allow)?;
             return Ok(Value::Null);
         }
+        // "Executar trecho": o painel só chama depois de o usuário confirmar o comando exato.
+        if method == "agentRunSnippet" {
+            let req = terminal::snippet(&self.data.root, a(1).as_str().unwrap_or(""), s(a(0))?)?;
+            let id = uuid::Uuid::new_v4().to_string();
+            emit(&self.data.app, json!({"type":"terminal","id":id,"command":terminal::display(&req.command,&req.args),"cwd":"","status":"running","origin":"snippet"}));
+            let (app, tid) = (self.data.app.clone(), id.clone());
+            let chunk = Arc::new(move |text: &str| emit(&app, json!({"type":"terminal-output","id":tid,"text":text})));
+            let (app, tid) = (self.data.app.clone(), id.clone());
+            let exited = Arc::new(move |v: &Value| emit(&app, json!({"type":"terminal","id":tid,"status":if v["signal"].is_string(){"killed"}else{"exited"},"exitCode":v["exitCode"],"signal":v["signal"]})));
+            if let Err(e) = self.data.terminals.spawn(&id, req, chunk, exited) {
+                emit(&self.data.app, json!({"type":"terminal","id":id,"status":"exited","exitCode":null,"error":e}));
+                return Err(e);
+            }
+            return Ok(json!(id));
+        }
         if method == "agentTerminalPolicy" {
             return Ok(self.data.policy.get());
         }

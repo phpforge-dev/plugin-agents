@@ -57,6 +57,14 @@ export function fakeApi({script, histories = new Map(), project = '/project', fi
   agentHistoryRename: async (id, title) => { const c = store().get(id); c.title = title.trim(); c.renamed = true; return c; },
   agentHistoryDelete: async id => { calls.push(['agentHistoryDelete', id]); if (id) store().delete(id); else store().clear(); },
   agentMentions: async (kind, query) => { calls.push(['agentMentions', kind, query]); const q = query.toLowerCase(); return kind === 'commit' ? [{hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', short: 'a1b2c3d', subject: 'Add User fixture', author: 'Fixture', when: '2 days ago'}, {hash: 'ffee000011112222333344445555666677778888', short: 'ffee000', subject: 'Initial commit', author: 'Fixture', when: '3 days ago'}].filter(c => !q || c.hash.startsWith(q) || c.subject.toLowerCase().includes(q)) : [{name: 'php-style', path: '.aiassistant/rules/php-style.md'}].filter(r => r.name.includes(q)); },
+  fileCreate: async (path, kind, text) => { calls.push(['fileCreate', path, kind, text]); if (files.includes(path)) throw Error(`${path} já existe`); files.push(path); return path; },
+  agentRunSnippet: async (code, lang) => {
+   calls.push(['agentRunSnippet', code, lang]);
+   const id = `snippet-${calls.length}`; const command = lang === 'php' ? 'php -r …' : code.split('\n').map(l => l.replace(/^\$ /, '')).join('\n').trim();
+   emit({type: 'terminal', id, command, cwd: '', status: 'running', origin: 'snippet'});
+   setTimeout(() => { emit({type: 'terminal-output', id, text: `saída de ${command}\n`}); emit({type: 'terminal', id, status: 'exited', exitCode: 0, signal: null}); }, 0);
+   return id;
+  },
   listFiles: async () => files,
   read: async path => ({path, text: `<?php // ${path}\n`}),
   searchSymbols: async query => [{name: 'User', kind: 5, containerName: 'Fixture', location: {uri: 'file:///project/src/User.php', range: {start: {line: 4, character: 0}, end: {line: 9, character: 1}}}}, {name: 'UserRepository', kind: 5, containerName: 'Fixture', location: {uri: 'file:///project/src/UserRepository.php', range: {start: {line: 2, character: 0}, end: {line: 3, character: 1}}}}].filter(s => s.name.toLowerCase().includes(query.toLowerCase())),
