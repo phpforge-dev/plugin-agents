@@ -71,6 +71,10 @@ fn write_atomic(path: &Path, value: &Value) -> Res<()> {
 }
 
 impl History {
+    /// Pasta de estado deste projeto (também guarda a allowlist do terminal).
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
     /// Pasta do projeto `root` dentro de `state` (identificada pelo hash do caminho canônico).
     pub fn new(state: &Path, root: &Path) -> Self {
         let key = hash(root.to_string_lossy().as_bytes());

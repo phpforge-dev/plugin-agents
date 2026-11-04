@@ -161,3 +161,17 @@
 .agent-find .agent-icon{width:22px;height:22px;padding:0;font-size:13px}
 mark.agent-find-match{background:rgba(255,198,0,.28);color:inherit;border-radius:2px}
 mark.agent-find-match.agent-find-current{background:rgba(255,145,0,.75);color:#000}
+
+.agent-actions .agent-allow-all{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.agent-actions .agent-allow-all.on{background:color-mix(in srgb,var(--warning) 22%,transparent);border-color:var(--warning);color:var(--text)}
+.agent-terminal-auto{color:var(--warning)}
+.agent-terminal-more{background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text)}
+.agent-terminal-menu button{flex-direction:column;align-items:flex-start;gap:2px}
+.agent-terminal-menu code{font-family:var(--mono,monospace);font-size:11px;color:var(--muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+dialog.agent-allowlist{background:var(--raised);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;width:min(560px,90vw)}
+dialog.agent-allowlist header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.agent-allowlist-info{color:var(--muted);font-size:12px}
+.agent-allowlist-rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow:auto}
+.agent-allowlist-rules li{display:flex;align-items:center;gap:8px;font-size:12px}
+.agent-allowlist-rules code{flex:1;font-family:var(--mono,monospace);overflow-wrap:anywhere}
+.agent-allowlist-kind{color:var(--muted);font-size:11px}

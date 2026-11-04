@@ -58,7 +58,7 @@ fn push(out: &Mutex<Output>, chunk: &str, limit: usize) {
 #[derive(Default)]
 pub struct Terminals {
     running: Mutex<HashMap<String, Terminal>>,
-    approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    approvals: Mutex<HashMap<String, (oneshot::Sender<bool>, String)>>,
 }
 pub struct Request {
     pub command: String,
@@ -96,13 +96,17 @@ impl Request {
 }
 impl Terminals {
     /// Registra o pedido de aprovação; a resposta vem de `decide`. Cancelado/encerrado = recusado.
-    pub fn ask(&self, id: &str) -> Res<oneshot::Receiver<bool>> {
+    pub fn ask(&self, id: &str, command: &str) -> Res<oneshot::Receiver<bool>> {
         let (tx, rx) = oneshot::channel();
-        self.approvals.lock().map_err(err)?.insert(id.into(), tx);
+        self.approvals.lock().map_err(err)?.insert(id.into(), (tx, command.into()));
         Ok(rx)
     }
+    /// Comando (como exibido) de um pedido ainda aberto.
+    pub fn command(&self, id: &str) -> Res<String> {
+        Ok(self.approvals.lock().map_err(err)?.get(id).ok_or("Pedido expirado")?.1.clone())
+    }
     pub fn decide(&self, id: &str, allow: bool) -> Res<()> {
-        let tx = self.approvals.lock().map_err(err)?.remove(id).ok_or("Pedido expirado")?;
+        let (tx, _) = self.approvals.lock().map_err(err)?.remove(id).ok_or("Pedido expirado")?;
         let _ = tx.send(allow);
         Ok(())
     }
@@ -212,7 +216,7 @@ impl Terminals {
     /// Recusa aprovações pendentes e encerra todos os processos (nova sessão, interromper, fechar).
     pub fn stop_all(&self) {
         if let Ok(mut a) = self.approvals.lock() {
-            for (_, tx) in a.drain() {
+            for (_, (tx, _)) in a.drain() {
                 let _ = tx.send(false);
             }
         }
@@ -226,7 +230,7 @@ impl Terminals {
     }
     pub fn deny_pending(&self) {
         if let Ok(mut a) = self.approvals.lock() {
-            for (_, tx) in a.drain() {
+            for (_, (tx, _)) in a.drain() {
                 let _ = tx.send(false);
             }
         }
@@ -267,7 +271,7 @@ mod tests {
     async fn runs_only_after_approval_and_reports_output_and_exit() {
         let (_d, r) = root();
         let t = Terminals::default();
-        let rx = t.ask("t1").unwrap();
+        let rx = t.ask("t1", "ls").unwrap();
         t.decide("t1", false).unwrap();
         assert!(!rx.await.unwrap(), "recusado");
         assert!(t.decide("t1", true).is_err(), "decisão só uma vez");
@@ -299,7 +303,7 @@ mod tests {
         let out = t.output("big").unwrap();
         assert_eq!(out["truncated"], true);
         assert!(out["output"].as_str().unwrap().len() <= 1024);
-        let rx = t.ask("p").unwrap();
+        let rx = t.ask("p", "ls").unwrap();
         t.stop_all();
         assert!(!rx.await.unwrap(), "pendente recusado ao encerrar");
     }

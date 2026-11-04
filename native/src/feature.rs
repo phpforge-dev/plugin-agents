@@ -4,6 +4,7 @@ fn s(v: &serde_json::Value) -> Result<&str, String> {
 use crate::{
     context,
     history::History,
+    policy::{self, Policy},
     prompt::{self, Capabilities},
     terminal::{self, Terminals},
     rpc::{Handler, Rpc},
@@ -55,6 +56,7 @@ struct Data {
     permissions: Mutex<HashMap<String, oneshot::Sender<Option<String>>>>,
     running: AtomicBool,
     terminals: Terminals,
+    policy: Policy,
 }
 struct Session {
     id: String,
@@ -130,6 +132,13 @@ impl Data {
                 Ok(json!({}))
             }
             "session/request_permission" => {
+                // "Permitir tudo" (só nesta sessão): escolhe a opção "permitir uma vez" do próprio agente.
+                if self.policy.allow_all() {
+                    if let Some(option) = params["options"].as_array().and_then(|o| o.iter().find(|v| v["kind"] == "allow_once")) {
+                        emit(&self.app, json!({"type":"permission-auto","title":params["toolCall"]["title"].as_str().unwrap_or("Ferramenta do agente"),"option":option["name"]}));
+                        return Ok(json!({"outcome":{"outcome":"selected","optionId":option["optionId"]}}));
+                    }
+                }
                 let id = uuid::Uuid::new_v4().to_string();
                 let (tx, rx) = oneshot::channel();
                 self.permissions.lock().map_err(err)?.insert(id.clone(), tx);
@@ -153,13 +162,19 @@ impl Data {
                 let req = terminal::Request::parse(&self.root, params)?;
                 let id = uuid::Uuid::new_v4().to_string();
                 let cwd = req.cwd.strip_prefix(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                let rx = self.terminals.ask(&id)?;
-                emit(&self.app, json!({"type":"terminal","id":id,"command":terminal::display(&req.command,&req.args),"cwd":cwd,"status":"waiting"}));
-                if !rx.await.unwrap_or(false) {
-                    emit(&self.app, json!({"type":"terminal","id":id,"status":"rejected"}));
-                    return Err("O usuário recusou executar este comando".into());
+                let display = terminal::display(&req.command, &req.args);
+                // Allowlist do projeto ou "Permitir tudo" desta sessão; senão, aprovação explícita.
+                if let Some(auto) = self.policy.decide(&display) {
+                    emit(&self.app, json!({"type":"terminal","id":id,"command":display,"cwd":cwd,"status":"running","auto":auto}));
+                } else {
+                    let rx = self.terminals.ask(&id, &display)?;
+                    emit(&self.app, json!({"type":"terminal","id":id,"command":display,"cwd":cwd,"status":"waiting","similar":policy::similar(&display)}));
+                    if !rx.await.unwrap_or(false) {
+                        emit(&self.app, json!({"type":"terminal","id":id,"status":"rejected"}));
+                        return Err("O usuário recusou executar este comando".into());
+                    }
+                    emit(&self.app, json!({"type":"terminal","id":id,"status":"running"}));
                 }
-                emit(&self.app, json!({"type":"terminal","id":id,"status":"running"}));
                 let (app, tid) = (self.app.clone(), id.clone());
                 let chunk = Arc::new(move |text: &str| emit(&app, json!({"type":"terminal-output","id":tid,"text":text})));
                 let (app, tid) = (self.app.clone(), id.clone());
@@ -249,8 +264,10 @@ impl Agents {
             .map(PathBuf::from)
             .or_else(|| app.path().app_config_dir().ok())
             .unwrap_or_else(std::env::temp_dir);
+        let history = History::new(&state, &root);
+        let policy = Policy::new(history.dir());
         Self {
-            history: History::new(&state, &root),
+            history,
             state: tokio::sync::Mutex::new(None),
             data: Arc::new(Data {
                 root,
@@ -259,6 +276,7 @@ impl Agents {
                 permissions: Mutex::new(HashMap::new()),
                 running: AtomicBool::new(false),
                 terminals: Terminals::default(),
+                policy,
             }),
         }
     }
@@ -278,6 +296,7 @@ impl Agents {
         }
         self.data.cancel_permissions();
         self.data.terminals.stop_all();
+        self.data.policy.reset_session();
         self.data.changes.lock().map_err(err)?.clear();
         self.data.changes();
         self.data.running.store(false, Ordering::Release);
@@ -429,8 +448,20 @@ impl Agents {
             _ => {}
         }
         if method == "agentTerminalDecision" {
-            self.data.terminals.decide(s(a(0))?, a(1).as_bool() == Some(true))?;
+            // Lembrar ("exact"/"similar") grava a regra antes de liberar o comando aprovado.
+            let allow = a(1).as_bool() == Some(true);
+            if let (true, Some(kind)) = (allow, a(2).as_str()) {
+                let command = self.data.terminals.command(s(a(0))?)?;
+                self.data.policy.add(kind, &command)?;
+            }
+            self.data.terminals.decide(s(a(0))?, allow)?;
             return Ok(Value::Null);
+        }
+        if method == "agentTerminalPolicy" {
+            return Ok(self.data.policy.get());
+        }
+        if method == "agentTerminalPolicySet" {
+            return self.data.policy.set(a(0));
         }
         if method == "agentTerminalKill" {
             self.data.terminals.kill(s(a(0))?)?;

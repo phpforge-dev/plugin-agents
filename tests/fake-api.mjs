@@ -3,14 +3,38 @@
  * API sintética. `script(prompt, blocks, emit, api)` decide o que o agente falso faz em cada pedido;
  * o padrão responde "Resposta a: <texto>". `calls` registra cada operação para asserções.
  */
+// Mesma regra do host (native/src/policy.rs): "semelhantes" = tudo menos o último argumento, sem operadores.
+const operators = c => /[`;&|<>\n\r]|\$\(|\$\{/.test(c);
+export const similar = c => { c = c.trim(); if (operators(c) || /['"\\]/.test(c)) return null; const i = c.lastIndexOf(' '); return i > 0 && c.slice(0, i + 1).trim() ? c.slice(0, i + 1) : null; };
+const matches = (r, c) => r.kind === 'exact' ? r.pattern === c : c.startsWith(r.pattern) && c.length > r.pattern.length && !/\s/.test(c.slice(r.pattern.length)) && !operators(c.slice(r.pattern.length));
+
 export function fakeApi({script, histories = new Map(), project = '/project', files = ['src/User.php', 'src/Admin.php', 'README.md'], commands = []} = {}) {
- const calls = []; let emit = () => {}; let permission; let terminals = new Map();
+ const calls = []; let emit = () => {}; let permission; let terminals = new Map(); const pending = new Map();
+ const policy = {allowAll: false, rules: []};
  const store = () => { if (!histories.has(project)) histories.set(project, new Map()); return histories.get(project); };
  const api = {
   calls, histories, connect(fn) { emit = fn; },
   agents: async () => [{id: 'fake', name: 'Agente de teste', available: true, detail: 'ACP falso'}],
-  agentStart: async id => { calls.push(['agentStart', id]); emit({type: 'session', agent: id, protocol: 1, modes: [{id: 'default', name: 'Padrão'}], mode: 'default', capabilities: {image: true, embeddedContext: true}}); if (commands.length) emit({type: 'commands', commands}); },
-  agentReset: async () => { calls.push(['agentReset']); emit({type: 'session', agent: 'fake', protocol: 1, modes: [], mode: null, capabilities: {image: true, embeddedContext: true}}); if (commands.length) emit({type: 'commands', commands}); },
+  policy,
+  /** Pedido de terminal como o host faz: allowlist/Permitir tudo rodam direto; senão espera a decisão. */
+  terminal: async (id, command, cwd = '') => {
+   const auto = policy.allowAll ? 'all' : policy.rules.some(r => matches(r, command)) ? 'allowlist' : null;
+   if (auto) { emit({type: 'terminal', id, command, cwd, status: 'running', auto}); return true; }
+   pending.set(id, command);
+   const decision = new Promise(r => terminals.set(id, r));
+   emit({type: 'terminal', id, command, cwd, status: 'waiting', similar: similar(command)});
+   const allow = await decision; if (!allow) emit({type: 'terminal', id, status: 'rejected'}); else emit({type: 'terminal', id, status: 'running'});
+   return allow;
+  },
+  agentTerminalPolicy: async () => structuredClone(policy),
+  agentTerminalPolicySet: async change => {
+   calls.push(['agentTerminalPolicySet', change]);
+   if (typeof change.allowAll === 'boolean') policy.allowAll = change.allowAll;
+   if (change.remove) policy.rules = policy.rules.filter(r => r.kind !== change.remove.kind || r.pattern !== change.remove.pattern);
+   return structuredClone(policy);
+  },
+  agentStart: async id => { calls.push(['agentStart', id]); policy.allowAll = false; emit({type: 'session', agent: id, protocol: 1, modes: [{id: 'default', name: 'Padrão'}], mode: 'default', capabilities: {image: true, embeddedContext: true}}); if (commands.length) emit({type: 'commands', commands}); },
+  agentReset: async () => { calls.push(['agentReset']); policy.allowAll = false; emit({type: 'session', agent: 'fake', protocol: 1, modes: [], mode: null, capabilities: {image: true, embeddedContext: true}}); if (commands.length) emit({type: 'commands', commands}); },
   agentPrompt: async (text, context, extras) => {
    calls.push(['agentPrompt', text, context, extras]);
    setTimeout(async () => { if (script) await script(text, extras, emit, api); else { emit({type: 'message', text: `Resposta a: ${text}`}); } emit({type: 'done', stopReason: 'end_turn'}); }, 0);
@@ -19,7 +43,12 @@ export function fakeApi({script, histories = new Map(), project = '/project', fi
   agentMode: async () => {}, agentKeep: async () => {}, agentDiscard: async () => {},
   agentPermission: async (id, option) => { calls.push(['agentPermission', id, option]); permission?.(option); },
   waitPermission: () => new Promise(r => { permission = r; }),
-  agentTerminalDecision: async (id, allow) => { calls.push(['agentTerminalDecision', id, allow]); terminals.get(id)?.(allow); },
+  agentTerminalDecision: async (id, allow, remember) => {
+   calls.push(['agentTerminalDecision', id, allow, ...(remember ? [remember] : [])]);
+   const command = pending.get(id); pending.delete(id);
+   if (allow && remember && command) { const pattern = remember === 'exact' ? command : similar(command); if (!pattern) throw Error('Este comando só pode ser permitido exatamente como está'); if (!policy.rules.some(r => r.kind === remember && r.pattern === pattern)) policy.rules.push({kind: remember, pattern}); }
+   terminals.get(id)?.(allow);
+  },
   waitTerminal: id => new Promise(r => terminals.set(id, r)),
   agentTerminalKill: async id => { calls.push(['agentTerminalKill', id]); },
   agentHistory: async () => [...store().values()].map(({items, ...s}) => s).sort((a, b) => b.updated - a.updated),

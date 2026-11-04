@@ -34,6 +34,8 @@
       "agentStart",
       "agentTerminalDecision",
       "agentTerminalKill",
+      "agentTerminalPolicy",
+      "agentTerminalPolicySet",
       "agents",
       "listFiles",
       "searchSymbols",

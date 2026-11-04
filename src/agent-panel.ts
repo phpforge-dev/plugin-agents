@@ -49,7 +49,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
 <div id="agent-transcript" role="log" aria-live="polite" aria-label="Conversa com o agente"></div>
 <section id="agent-changes" hidden><div class="agent-changes-head"><strong>Alterações pendentes (<span id="agent-change-count">0</span>)</strong><button id="agent-keep-all">Manter tudo</button><button id="agent-discard-all">Descartar tudo</button></div><ul id="agent-change-list"></ul></section>
 <div class="agent-input"><textarea id="agent-prompt" placeholder="Digite sua tarefa, use @ para adicionar arquivos ou / para comandos" aria-label="Pedido ao agente (Enter envia, Shift+Enter quebra linha)" disabled></textarea><div id="agent-command-hint" class="agent-command-hint" hidden></div><div id="agent-chips" class="agent-chips" hidden></div>
-<div class="agent-actions"><button id="agent-attach" class="agent-icon" type="button" title="Adicionar anexo" aria-label="Adicionar anexo" aria-haspopup="menu" aria-expanded="false">+</button><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
+<div class="agent-actions"><button id="agent-attach" class="agent-icon" type="button" title="Adicionar anexo" aria-label="Adicionar anexo" aria-haspopup="menu" aria-expanded="false">+</button><button id="agent-allow-all" type="button" class="agent-allow-all" aria-pressed="false" disabled title="Executar comandos do terminal e ações do agente sem pedir aprovação, só nesta sessão (não recomendado)">Permitir tudo</button><label><input type="checkbox" id="agent-context"> Contexto da IDE</label><button id="agent-cancel" disabled>Interromper</button><button id="agent-send" class="primary" disabled>Enviar</button></div></div>
 </div>`;
  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>('#' + id)!;
  const liveTerminals = new Set<string>();
@@ -186,15 +186,62 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   head.append(title, state);
   const command = document.createElement('pre'); command.className = 'agent-terminal-command'; command.textContent = `$ ${item.command}`;
   const cwd = document.createElement('div'); cwd.className = 'agent-terminal-cwd'; cwd.textContent = item.cwd ? `em ${item.cwd}/` : 'na raiz do projeto';
+  if (item.auto) { const auto = document.createElement('span'); auto.className = 'agent-terminal-auto'; auto.textContent = item.auto === 'all' ? ' · sem aprovação (Permitir tudo)' : ' · permitido pela allowlist'; cwd.append(auto); }
   el.replaceChildren(head, command, cwd);
   if (live && (item.status === 'waiting' || item.status === 'running')) {
    const actions = document.createElement('div'); actions.className = 'agent-terminal-actions';
    const button = (label: string, cls: string, run: () => Promise<unknown>) => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = () => { actions.querySelectorAll('button').forEach(x => x.disabled = true); void run().catch((error: unknown) => hooks.status(String(error))); }; actions.append(b); return b; };
-   if (item.status === 'waiting') { button(tr('Executar'), 'primary agent-terminal-run', () => api.agentTerminalDecision(item.id, true)); button(tr('Recusar'), 'agent-terminal-reject', () => api.agentTerminalDecision(item.id, false)); }
+   if (item.status === 'waiting') {
+    button(tr('Executar'), 'primary agent-terminal-run', () => api.agentTerminalDecision(item.id, true)); button(tr('Recusar'), 'agent-terminal-reject', () => api.agentTerminalDecision(item.id, false));
+    // Como o "More actions" do Junie: executar e guardar na allowlist do projeto.
+    if (api.agentTerminalPolicySet) {
+     const more = document.createElement('button'); more.className = 'agent-terminal-more agent-icon'; more.textContent = '⋯'; more.title = tr('Executar e permitir sem perguntar'); more.setAttribute('aria-haspopup', 'menu');
+     more.onclick = () => rememberMenu(more, item, (kind: string) => { actions.querySelectorAll('button').forEach(x => x.disabled = true); void api.agentTerminalDecision(item.id, true, kind).catch((error: unknown) => hooks.status(String(error))); });
+     actions.append(more);
+    }
+   }
    else button(tr('Interromper'), 'agent-terminal-kill', () => api.agentTerminalKill(item.id));
    el.append(actions);
   }
   if (item.output) { const out = document.createElement('pre'); out.className = 'agent-terminal-output'; out.textContent = (item.truncated ? '…\n' : '') + item.output; el.append(out); requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); }
+ }
+ function rememberMenu(anchor: HTMLElement, item: Extract<Item, { kind: 'terminal' }>, run: (kind: string) => void) {
+  const menu = document.createElement('div'); menu.className = 'agent-menu agent-terminal-menu'; menu.setAttribute('role', 'menu');
+  const rect = anchor.getBoundingClientRect(); menu.style.left = `${Math.max(4, rect.left)}px`; menu.style.top = `${rect.bottom + 2}px`;
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', outside); };
+  const outside = (e: Event) => { if (!menu.contains(e.target as Node)) close(); };
+  const entry = (label: string, detail: string, kind: string) => { const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.dataset.kind = kind; b.innerHTML = '<span></span><code></code>'; b.firstElementChild!.textContent = label; b.lastElementChild!.textContent = detail; b.onclick = () => { close(); run(kind); }; menu.append(b); };
+  entry(tr('Executar e permitir este comando'), item.command, 'exact');
+  if (item.similar) entry(tr('Executar e permitir comandos semelhantes'), `${item.similar}…`, 'similar');
+  document.body.append(menu); (menu.firstElementChild as HTMLElement).focus(); own(() => menu.remove());
+  menu.onkeydown = e => { if (e.key === 'Escape') { close(); anchor.focus(); } };
+  setTimeout(() => document.addEventListener('mousedown', outside));
+ }
+ /** "Permitir tudo": só para a sessão atual do agente; o host o desliga a cada sessão nova. */
+ let allowAll = false;
+ function showAllowAll(value: boolean) { allowAll = value; const b = $<HTMLButtonElement>('agent-allow-all'); b.setAttribute('aria-pressed', String(value)); b.classList.toggle('on', value); }
+ $('agent-allow-all').onclick = async () => {
+  try { const policy = await api.agentTerminalPolicySet({ allowAll: !allowAll }); showAllowAll(!!policy.allowAll); hooks.status(policy.allowAll ? tr('Permitir tudo ligado nesta sessão: comandos e ações rodam sem aprovação.') : tr('Permitir tudo desligado: cada comando volta a pedir aprovação.')); }
+  catch (error) { hooks.status(String(error)); }
+ };
+ /** Allowlist do terminal (⋮): regras gravadas por projeto, removíveis. */
+ async function allowlistDialog() {
+  const dialog = document.createElement('dialog'); dialog.className = 'agent-allowlist'; dialog.setAttribute('aria-label', tr('Allowlist do terminal'));
+  const head = document.createElement('header'); const title = document.createElement('strong'); title.textContent = tr('Allowlist do terminal'); const closeButton = document.createElement('button'); closeButton.textContent = tr('Fechar'); head.append(title, closeButton);
+  const info = document.createElement('p'); info.className = 'agent-allowlist-info'; info.textContent = tr('Comandos que o agente pode executar sem pedir aprovação neste projeto. Os demais continuam esperando Executar.');
+  const list = document.createElement('ul'); list.className = 'agent-allowlist-rules';
+  dialog.append(head, info, list); document.body.append(dialog); own(() => dialog.remove()); dialog.showModal();
+  const render = (policy: { rules: { kind: string; pattern: string }[] }) => {
+   list.replaceChildren(...policy.rules.map(rule => {
+    const li = document.createElement('li'); const code = document.createElement('code'); code.textContent = rule.kind === 'similar' ? `${rule.pattern}…` : rule.pattern;
+    const kind = document.createElement('span'); kind.className = 'agent-allowlist-kind'; kind.textContent = rule.kind === 'similar' ? tr('semelhantes') : tr('igual');
+    const remove = document.createElement('button'); remove.textContent = tr('Remover'); remove.onclick = async () => { try { render(await api.agentTerminalPolicySet({ remove: rule })); } catch (error) { hooks.status(String(error)); } };
+    li.append(code, kind, remove); return li;
+   }));
+   if (!policy.rules.length) { const li = document.createElement('li'); li.className = 'agent-allowlist-empty'; li.textContent = tr('Nenhuma regra. Use ⋯ ao aprovar um comando para adicionar.'); list.append(li); }
+  };
+  closeButton.onclick = () => dialog.close(); dialog.addEventListener('close', () => dialog.remove());
+  try { render(await api.agentTerminalPolicy()); } catch (error) { hooks.status(String(error)); }
  }
  const pendingApprovals = () => transcript.items.some(i => i.kind === 'terminal' && i.status === 'waiting' && liveTerminals.has(i.id)) || !!root.querySelector('.agent-permission');
  function save() {
@@ -262,6 +309,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); menu.style.left = `${Math.max(4, rect.right - 220)}px`; menu.style.top = `${rect.bottom + 2}px`;
   const item = (label: string, shortcut: string, run: () => unknown) => { const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.innerHTML = '<span></span><kbd></kbd>'; b.firstElementChild!.textContent = label; b.lastElementChild!.textContent = shortcut; b.onclick = () => { menu.remove(); void run(); }; menu.append(b); return b; };
   item(tr('Buscar na conversa'), keymap?.shortcut?.('agent.findInChat') || (navigator.platform?.startsWith('Mac') ? '⌘F' : 'Ctrl+F'), () => { showHistory(false); find.open(); });
+  if (api.agentTerminalPolicy) item(tr('Allowlist do terminal…'), '', () => allowlistDialog());
   item(tr('Excluir todas as conversas'), '', async () => { await history.deleteAll(); if (!$('agent-history').hidden) void history.show(); });
   document.body.append(menu); (menu.firstElementChild as HTMLElement).focus();
   const close = (e: Event) => { if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('mousedown', close); } };
@@ -329,6 +377,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   switch (event.type) {
    case 'session': {
     started = true; busy(false); agentId = event.agent; commands = []; input.refresh();
+    $<HTMLButtonElement>('agent-allow-all').disabled = !api.agentTerminalPolicySet; showAllowAll(false);
     capabilities = { image: !!(event as any).capabilities?.image, embeddedContext: !!(event as any).capabilities?.embeddedContext };
     const name = agents.find(a => a.id === event.agent)?.name ?? event.agent;
     $('agent-detail').textContent = `${name} conectado${event.protocol ? ` · ACP v${event.protocol}` : ''}`;
@@ -355,13 +404,15 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
    }
    case 'changes': changes = event.changes; renderChanges(); break;
    case 'terminal' as never: {
-    const e = event as unknown as { id: string; command?: string; cwd?: string; status: 'waiting' | 'running' | 'exited' | 'rejected' | 'killed'; exitCode?: number | null; signal?: string | null };
-    if (e.status === 'waiting') { liveTerminals.add(e.id); transcript.add({ kind: 'terminal', id: e.id, command: e.command ?? '', cwd: e.cwd ?? '', status: 'waiting', output: '' }); }
+    const e = event as unknown as { id: string; command?: string; cwd?: string; status: 'waiting' | 'running' | 'exited' | 'rejected' | 'killed'; exitCode?: number | null; signal?: string | null; auto?: 'all' | 'allowlist'; similar?: string | null; origin?: 'snippet' };
+    // Pedido novo: espera aprovação, ou já roda (allowlist, Permitir tudo, Executar trecho).
+    if (e.command !== undefined && !transcript.items.some(i => i.kind === 'terminal' && i.id === e.id)) { liveTerminals.add(e.id); transcript.endStream(); transcript.add({ kind: 'terminal', id: e.id, command: e.command, cwd: e.cwd ?? '', status: e.status, output: '', ...(e.auto ? { auto: e.auto } : {}), ...(e.similar ? { similar: e.similar } : {}), ...(e.origin ? { origin: e.origin } : {}) }); }
     else transcript.terminal(e.id, { status: e.status, ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}), ...(e.signal !== undefined ? { signal: e.signal } : {}) });
     waiting = pendingApprovals(); history.refresh();
     if (e.status === 'waiting') transcript.element(transcript.items[transcript.items.length - 1])?.scrollIntoView?.({ block: 'nearest' });
     break;
    }
+   case 'permission-auto' as never: { const e = event as unknown as { title: string; option: string }; transcript.add({ kind: 'note', text: `${e.title} — ${e.option} (Permitir tudo)` }); break; }
    case 'terminal-output' as never: { const e = event as unknown as { id: string; text: string }; transcript.terminalOutput(e.id, e.text); break; }
    case 'done':
     transcript.endStream(); busy(false);
@@ -377,7 +428,7 @@ export function mountAgent(api: any, root: HTMLElement, hooks: Hooks) {
   }
  }
  void load().catch(error => { $('agent-detail').textContent = String(error); });
- return { handle, generate: generation.generate, cancel: generation.cancel, reset() { generation.reset(); transcript.clear(); welcome.hidden = false; conversation = { restored: false }; waiting = false; changes = []; renderChanges(); started = false; busy(false); showHistory(false); void load(); } };
+ return { handle, generate: generation.generate, cancel: generation.cancel, reset() { generation.reset(); showAllowAll(false); $<HTMLButtonElement>('agent-allow-all').disabled = true; transcript.clear(); welcome.hidden = false; conversation = { restored: false }; waiting = false; changes = []; renderChanges(); started = false; busy(false); showHistory(false); void load(); } };
 }
 
 function ownEditor(...args:any[]){const v=monaco.editor.createDiffEditor(...args);own(()=>v.dispose());return v;}

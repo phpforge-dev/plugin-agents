@@ -8,7 +8,7 @@ export type Item =
  | { kind: 'plan'; entries: { content: string; status: string }[] }
  | { kind: 'note'; text: string }
  | { kind: 'error'; text: string }
- | { kind: 'terminal'; id: string; command: string; cwd: string; status: 'waiting' | 'running' | 'exited' | 'rejected' | 'killed'; output: string; exitCode?: number | null; signal?: string | null; truncated?: boolean };
+ | { kind: 'terminal'; id: string; command: string; cwd: string; status: 'waiting' | 'running' | 'exited' | 'rejected' | 'killed'; output: string; exitCode?: number | null; signal?: string | null; truncated?: boolean; auto?: 'all' | 'allowlist'; similar?: string | null; origin?: 'snippet' };
 export type Conversation = { id: string; agent: string; items: Item[] };
 export type Summary = { id: string; title: string; agent: string; created: number; updated: number };
 

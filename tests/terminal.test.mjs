@@ -33,7 +33,8 @@ test('cada comando do agente espera aprovação explícita: Executar roda, Recus
  assert.equal(block.querySelector('strong').textContent, 'Executar comando no terminal?');
  assert.equal(block.querySelector('.agent-terminal-command').textContent, '$ php vendor/bin/phpunit');
  assert.equal(block.querySelector('.agent-terminal-status').textContent, 'Aguardando aprovação');
- assert.deepEqual([...block.querySelectorAll('.agent-terminal-actions button')].map(b => b.textContent), ['Executar', 'Recusar']);
+ assert.deepEqual([...block.querySelectorAll('.agent-terminal-actions button')].map(b => b.textContent), ['Executar', 'Recusar', '⋯']);
+ assert.equal($('#agent-allow-all').getAttribute('aria-pressed'), 'false', 'aprovação explícita é o padrão');
  assert.equal(api.calls.filter(c => c[0] === 'agentTerminalDecision').length, 0, 'nada roda sem decisão');
  // Ponto amarelo no histórico enquanto espera.
  $('#agent-history-button').click(); await tick();
@@ -85,5 +86,74 @@ test('Interromper encerra o comando em execução; fim do turno recusa pedido pe
  assert.deepEqual(api.calls.find(c => c[0] === 'agentTerminalKill'), ['agentTerminalKill', 'k']);
  assert.equal($('.agent-terminal[data-id="k"] .agent-terminal-status').textContent, 'Interrompido (SIGKILL)');
  assert.equal($('.agent-terminal[data-id="p"] .agent-terminal-status').textContent, 'Recusado', 'turno terminou com pedido aberto');
+ w.happyDOM.abort();
+});
+
+test('allowlist: ⋯ executa e lembra (igual ou semelhantes); regra vale nos próximos pedidos e pode ser removida', async () => {
+ const w = dom();
+ const api = fakeApi({script: async (text, _e, emit, api) => {
+  for (const [i, command] of text.split(' | ').entries()) { const ok = await api.terminal(`${text.length}-${i}`, command); if (ok) emit({type: 'terminal', id: `${text.length}-${i}`, status: 'exited', exitCode: 0}); }
+ }});
+ const s = makeSdk(); activate(s); s.api = api;
+ const panel = s.contribution.mount(api, $('#agent'), {context: () => undefined, reload: async () => {}, status: () => {}, language: () => 'php'});
+ api.connect(e => panel.handle(e)); await tick();
+ $('#agent-start').click(); await tick();
+ $('#agent-prompt').value = 'git log --oneline -2 | php vendor/bin/phpunit'; $('#agent-send').click(); await tick(8);
+ // Primeiro: ⋯ › comandos semelhantes.
+ document.querySelector('.agent-terminal-more').click(); await tick();
+ assert.deepEqual([...document.querySelectorAll('.agent-terminal-menu button')].map(b => [b.dataset.kind, b.querySelector('code').textContent]), [['exact', 'git log --oneline -2'], ['similar', 'git log --oneline …']]);
+ document.querySelector('.agent-terminal-menu button[data-kind="similar"]').click(); await tick(8);
+ assert.deepEqual(api.calls.find(c => c[0] === 'agentTerminalDecision'), ['agentTerminalDecision', $('.agent-terminal').dataset.id, true, 'similar']);
+ // Segundo: ⋯ › este comando.
+ document.querySelectorAll('.agent-terminal')[1].querySelector('.agent-terminal-more').click(); await tick();
+ document.querySelector('.agent-terminal-menu button[data-kind="exact"]').click(); await tick(10);
+ assert.deepEqual(api.policy.rules, [{kind: 'similar', pattern: 'git log --oneline '}, {kind: 'exact', pattern: 'php vendor/bin/phpunit'}]);
+ // Próximo turno: regras liberam; o que não casa continua pedindo.
+ const before = api.calls.filter(c => c[0] === 'agentTerminalDecision').length;
+ $('#agent-prompt').value = 'git log --oneline -20 | php vendor/bin/phpunit | git log --oneline -2;rm -rf x'; $('#agent-send').click(); await tick(10);
+ const blocks = [...document.querySelectorAll('.agent-terminal')].slice(2);
+ assert.deepEqual(blocks.map(b => [b.dataset.status, b.querySelector('.agent-terminal-auto')?.textContent ?? '']), [['exited', ' · permitido pela allowlist'], ['exited', ' · permitido pela allowlist'], ['waiting', '']]);
+ assert.equal(blocks[2].querySelector('.agent-terminal-more') !== null, true);
+ assert.equal(api.calls.filter(c => c[0] === 'agentTerminalDecision').length, before, 'allowlist não passa por decisão');
+ blocks[2].querySelector('.agent-terminal-more').click(); await tick();
+ assert.deepEqual([...document.querySelectorAll('.agent-terminal-menu button')].map(b => b.dataset.kind), ['exact'], 'com operador: só o comando exato');
+ document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true})); await tick();
+ blocks[2].querySelector('.agent-terminal-reject').click(); await tick(10);
+ // ⋮ › Allowlist do terminal… lista e remove.
+ $('#agent-options').click();
+ [...document.querySelectorAll('.agent-menu button')].find(b => b.textContent.startsWith('Allowlist')).click(); await tick();
+ assert.deepEqual([...document.querySelectorAll('.agent-allowlist-rules code')].map(c => c.textContent), ['git log --oneline …', 'php vendor/bin/phpunit']);
+ document.querySelector('.agent-allowlist-rules button').click(); await tick();
+ assert.deepEqual([...document.querySelectorAll('.agent-allowlist-rules code')].map(c => c.textContent), ['php vendor/bin/phpunit']);
+ assert.deepEqual(api.policy.rules, [{kind: 'exact', pattern: 'php vendor/bin/phpunit'}]);
+ w.happyDOM.abort();
+});
+
+test('Permitir tudo vale só para a sessão: liga, roda sem perguntar, e volta a desligado numa sessão nova', async () => {
+ const w = dom();
+ const api = fakeApi({script: async (text, _e, emit, api) => { const id = `x${text.length}`; if (await api.terminal(id, text)) emit({type: 'terminal', id, status: 'exited', exitCode: 0}); }});
+ const s = makeSdk(); activate(s); s.api = api;
+ const panel = s.contribution.mount(api, $('#agent'), {context: () => undefined, reload: async () => {}, status: () => {}, language: () => 'php'});
+ api.connect(e => panel.handle(e)); await tick();
+ assert.equal($('#agent-allow-all').disabled, true, 'sem sessão');
+ $('#agent-start').click(); await tick();
+ assert.equal($('#agent-allow-all').disabled, false);
+ $('#agent-allow-all').click(); await tick();
+ assert.equal($('#agent-allow-all').getAttribute('aria-pressed'), 'true');
+ assert.ok($('#agent-allow-all').classList.contains('on'));
+ $('#agent-prompt').value = 'rm -rf build'; $('#agent-send').click(); await tick(10);
+ assert.equal($('.agent-terminal').dataset.status, 'exited');
+ assert.equal($('.agent-terminal-auto').textContent, ' · sem aprovação (Permitir tudo)');
+ // Ações ACP com "permitir uma vez" também passam, e ficam registradas na conversa.
+ panel.handle({type: 'permission-auto', title: 'Editar src/User.php', option: 'Allow once'});
+ assert.match($('#agent-transcript').textContent, /Editar src\/User\.php — Allow once \(Permitir tudo\)/);
+ $('#agent-allow-all').click(); await tick();
+ assert.equal(api.policy.allowAll, false);
+ $('#agent-allow-all').click(); await tick();
+ $('#agent-new').click(); await tick(6);
+ assert.equal($('#agent-allow-all').getAttribute('aria-pressed'), 'false', 'nova sessão desliga');
+ assert.equal(api.policy.allowAll, false);
+ $('#agent-prompt').value = 'rm -rf build'; $('#agent-send').click(); await tick(10);
+ assert.equal($('.agent-terminal').dataset.status, 'waiting');
  w.happyDOM.abort();
 });

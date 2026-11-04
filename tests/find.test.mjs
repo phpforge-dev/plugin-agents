@@ -47,7 +47,7 @@ test('Buscar na conversa: ⌘F abre, realça, conta, navega, acompanha mensagens
  // Também pelo ⋮.
  $('#agent-options').click();
  const items = [...document.querySelectorAll('.agent-menu button')].map(b => b.firstElementChild.textContent);
- assert.deepEqual(items, ['Buscar na conversa', 'Excluir todas as conversas']);
+ assert.deepEqual(items, ['Buscar na conversa', 'Allowlist do terminal…', 'Excluir todas as conversas']);
  document.querySelector('.agent-menu button').click();
  assert.equal($('.agent-find').hidden, false);
  assert.equal($('.agent-find-input').value, 'admin', 'mantém o último termo');
